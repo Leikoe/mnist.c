@@ -1,4 +1,5 @@
 .venv
 downloads/
+build/
 pyrightconfig.json
 train_mnist
