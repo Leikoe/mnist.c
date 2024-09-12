@@ -1,5 +1,6 @@
-import hashlib, urllib, pathlib, tempfile, gzip, os
+import hashlib, pathlib, tempfile, gzip, os
 from typing import Optional, Union
+import urllib.request
 
 # modified snippet from https://github.com/tinygrad/tinygrad/blob/master/tinygrad/helpers.py#L266
 def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None, gunzip:bool=False) -> pathlib.Path:
@@ -29,10 +30,10 @@ def _mnist(file, name):
     fetch("https://storage.googleapis.com/cvdf-datasets/mnist/"+file, name, gunzip=True)
 
 def mnist(device=None):
-  return _mnist("train-images-idx3-ubyte.gz", "train_x"), \
-            _mnist("train-labels-idx1-ubyte.gz", "train_y"), \
-            _mnist("t10k-images-idx3-ubyte.gz", "test_x"), \
-            _mnist("t10k-labels-idx1-ubyte.gz", "test_y")
+  return _mnist("train-images-idx3-ubyte.gz", "X_train"), \
+            _mnist("train-labels-idx1-ubyte.gz", "Y_train"), \
+            _mnist("t10k-images-idx3-ubyte.gz", "X_test"), \
+            _mnist("t10k-labels-idx1-ubyte.gz", "Y_test")
 
 if __name__ == "__main__":
     mnist()

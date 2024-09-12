@@ -9,10 +9,10 @@ def _mnist(name):
         return torch.Tensor(list(f.read()))
 
 def mnist(device=None):
-  return _mnist("train_x.gunzip")[0x10:].reshape(-1,1,28,28).to(device), \
-            _mnist("train_y.gunzip")[8:].to(device), \
-            _mnist("test_x.gunzip")[0x10:].reshape(-1,1,28,28).to(device), \
-            _mnist("test_y.gunzip")[8:].to(device)
+  return _mnist("X_train.gunzip")[0x10:].reshape(-1,1,28,28).to(device), \
+            _mnist("Y_train.gunzip")[8:].to(device), \
+            _mnist("X_test.gunzip")[0x10:].reshape(-1,1,28,28).to(device), \
+            _mnist("Y_test.gunzip")[8:].to(device)
 
 
 if __name__ == "__main__":
