@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 
 #define X_OFFSET 0x10
 #define Y_OFFSET 8
@@ -29,9 +30,11 @@ int main()
     int Y_test_len;
     float *Y_test = tensor_from_disk("./downloads/Y_test.gunzip", Y_OFFSET, &Y_test_len);
 
-    printf("X_train imgs: %d\n", X_train_len / (IMAGE_SIZE * IMAGE_SIZE));
-    printf("Y_train labels: %d\n", Y_train_len);
-    printf("X_test imgs: %d\n", X_test_len / (IMAGE_SIZE * IMAGE_SIZE));
-    printf("Y_test labels: %d\n", Y_test_len);
+    int train_len = X_train_len / (IMAGE_SIZE * IMAGE_SIZE);
+    assert(train_len == Y_train_len); // we should have as many images as labels
+    int test_len = X_test_len / (IMAGE_SIZE * IMAGE_SIZE);
+    assert(test_len == Y_test_len);
+
+    printf("train set size: %d | test set size: %d\n", train_len, test_len);
     return 0;
 }
