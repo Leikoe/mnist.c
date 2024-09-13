@@ -7,15 +7,15 @@
 #define IMAGE_SIZE 28
 
 // returns an allocated array which must be freed
-float *tensor_from_disk(const char *path, const int offset, int *len)
+void *tensor_from_disk(const char *path, const int offset, int *len)
 {
     FILE *f = fopen(path, "rb"); // open file at path
     fseek(f, 0L, SEEK_END);      // get length
     int f_size = ftell(f);
-    *len = f_size - offset;                      // set read array length
-    float *arr = malloc(sizeof(float) * (*len)); // get some memory to store read bytes
-    fread(arr, 1, *len, f);                      // copy "length" bytes from file into the array
-    fclose(f);                                   // close the file
+    *len = f_size - offset;   // set read array length
+    char *arr = malloc(*len); // get some memory to store read bytes
+    fread(arr, 1, *len, f);   // copy "length" bytes from file into the array
+    fclose(f);                // close the file
     return arr;
 }
 
@@ -164,5 +164,11 @@ int main()
         printf("--------\n");
     }
 
+    int tensor_len;
+    float *tensor = tensor_from_disk("./tensor.bin", 0, &tensor_len);
+    for (int i = 0; i < tensor_len / 4; i++)
+    {
+        printf("%f\n", tensor[i]);
+    }
     return 0;
 }
