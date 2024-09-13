@@ -47,7 +47,8 @@ void matmul_forward_naive(float *out,
 }
 
 void conv2d_forward(
-    // out_H = H - K_H + 1; out_W = W - K_W + 1
+    // out_H = H - K_H + 1
+    // out_W = W - K_W + 1
     float *out,           // (B, K_C, out_H, out_W)
     const float *in,      // (B, C, H, W)
     const float *kernels, // (K_C, C, K_H, K_W)
@@ -88,11 +89,11 @@ void conv2d_forward(
                                 float a = in[bk_cc + ((j + k_j) * W) + (i + k_i)];
                                 float b = kernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (k_j * K_W) + k_i];
                                 inner_acc += a * b;
-                                printf("%f * %f k_j: %d k_i: %d j: %d i: %d makes (%d, %d) idx: %d\n", a, b, k_j, k_i, j, i, j + k_j, i + k_i, ((j + k_j) * out_W) + (i + k_i));
+                                // printf("%f * %f k_j: %d k_i: %d j: %d i: %d makes (%d, %d) idx: %d\n", a, b, k_j, k_i, j, i, j + k_j, i + k_i, ((j + k_j) * out_W) + (i + k_i));
                             }
                         }
                         acc[j][i] += inner_acc;
-                        printf("storing %f at (%d, %d)\n", inner_acc, j, i);
+                        // printf("storing %f at (%d, %d)\n", inner_acc, j, i);
                     }
                 }
             }
@@ -116,46 +117,51 @@ void conv2d_forward(
 
 int main()
 {
-    int X_train_len;
-    float *X_train = tensor_from_disk("./downloads/X_train.gunzip", X_OFFSET, &X_train_len);
-    int Y_train_len;
-    float *Y_train = tensor_from_disk("./downloads/Y_train.gunzip", Y_OFFSET, &Y_train_len);
-    int X_test_len;
-    float *X_test = tensor_from_disk("./downloads/X_test.gunzip", X_OFFSET, &X_test_len);
-    int Y_test_len;
-    float *Y_test = tensor_from_disk("./downloads/Y_test.gunzip", Y_OFFSET, &Y_test_len);
+    // int X_train_len;
+    // float *X_train = tensor_from_disk("./downloads/X_train.gunzip", X_OFFSET, &X_train_len);
+    // int Y_train_len;
+    // float *Y_train = tensor_from_disk("./downloads/Y_train.gunzip", Y_OFFSET, &Y_train_len);
+    // int X_test_len;
+    // float *X_test = tensor_from_disk("./downloads/X_test.gunzip", X_OFFSET, &X_test_len);
+    // int Y_test_len;
+    // float *Y_test = tensor_from_disk("./downloads/Y_test.gunzip", Y_OFFSET, &Y_test_len);
 
-    int train_len = X_train_len / (IMAGE_SIZE * IMAGE_SIZE);
-    assert(train_len == Y_train_len); // we should have as many images as labels
-    int test_len = X_test_len / (IMAGE_SIZE * IMAGE_SIZE);
-    assert(test_len == Y_test_len);
+    // int train_len = X_train_len / (IMAGE_SIZE * IMAGE_SIZE);
+    // assert(train_len == Y_train_len); // we should have as many images as labels
+    // int test_len = X_test_len / (IMAGE_SIZE * IMAGE_SIZE);
+    // assert(test_len == Y_test_len);
 
-    printf("train set size: %d | test set size: %d\n", train_len, test_len);
+    // printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
-#define b 1
+#define b 2
 #define c 1
 #define h 3
 #define w 3
-    float arr[b * c * h * w] = {1, 6, 2, 5, 3, 1, 7, 0, 4};
+    float arr[b * c * h * w] = {1, 6, 2, 5, 3, 1, 7, 0, 4,
+                                1, 6, 2, 5, 3, 1, 7, 0, 4};
 
 #define k_c 1
 #define k_h 2
 #define k_w 2
-    float kernels[k_c * k_h * k_w] = {1, 2, -1, 0};
+    float kernels[k_c * c * k_h * k_w] = {1, 2, -1, 0};
 
 #define out_h (h - k_h + 1)
 #define out_w (w - k_w + 1)
 
-    float out[b * k_c * out_h * out_w] = {1, 2, 3};
+    float out[b * k_c * out_h * out_w];
     conv2d_forward(out, arr, kernels, NULL, b, c, h, w, k_c, k_h, k_w);
 
-    for (int j = 0; j < out_h; j++)
+    for (int z = 0; z < b; z++)
     {
-        for (int i = 0; i < out_w; i++)
+        for (int j = 0; j < out_h; j++)
         {
-            printf("%f ", out[j * out_w + i]);
+            for (int i = 0; i < out_w; i++)
+            {
+                printf("%f ", out[z * out_h * out_w + j * out_w + i]);
+            }
+            printf("\n");
         }
-        printf("\n");
+        printf("--------\n");
     }
 
     return 0;
