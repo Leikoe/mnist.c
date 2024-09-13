@@ -1,9 +1,9 @@
 import torch.nn.functional as F
 import torch
 
-arr = torch.tensor([[1, 2, 3],
-                    [4, 5, 6],
-                    [7, 8, 9]]).unsqueeze(0).unsqueeze(0)
+arr = torch.tensor([[1, 6, 2],
+                    [5, 3, 1],
+                    [7, 0, 4]]).unsqueeze(0).unsqueeze(0)
 
 kernels = torch.tensor([[1, 2],
                     [-1, 0]]).unsqueeze(0).unsqueeze(0)

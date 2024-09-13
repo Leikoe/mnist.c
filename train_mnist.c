@@ -52,7 +52,7 @@ void conv2d_forward(
     float *out,           // (B, K_C, out_H, out_W)
     const float *in,      // (B, C, H, W)
     const float *kernels, // (K_C, C, K_H, K_W)
-    const float *bias,    // (K_C, out_H, out_W)
+    const float *bias,    // (K_C)
     const int B, const int C, const int H, const int W,
     const int K_C, const int K_H, const int K_W)
 {
@@ -68,7 +68,7 @@ void conv2d_forward(
             {
                 for (int i = 0; i < out_W; i++)
                 {
-                    acc[j][i] = (bias != NULL) ? bias[(k_c * out_H * out_W) + (j * out_W) + i] : 0.0f;
+                    acc[j][i] = (bias != NULL) ? bias[k_c] : 0.0f;
                 }
             }
 
