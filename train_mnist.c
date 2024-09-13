@@ -74,7 +74,7 @@ void conv2d_forward(
 
             for (int c = 0; c < C; c++)
             {
-                int bk_cc = (b * C * out_H * out_W) + (c * out_H * out_W);
+                int bk_cc = (b * C * H * W) + (c * H * W);
                 // slide kernel
                 for (int j = 0; j < out_H; j++)
                 {
@@ -157,7 +157,7 @@ int main()
         {
             for (int i = 0; i < out_w; i++)
             {
-                printf("%f ", out[z * out_h * out_w + j * out_w + i]);
+                printf("%f ", out[(z * out_h * out_w) + (j * out_w) + i]);
             }
             printf("\n");
         }
