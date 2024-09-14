@@ -163,8 +163,122 @@ void maxpool2d_forward(
     }
 }
 
+// out = x @ weight.T + bias
+void linear_forward(
+    float *out,          // (B, 1, out_features)
+    const float *x,      // (B, 1, in_features)
+    const float *weight, // (out_features, in_features)
+    const float *bias,   // (out_features)
+    const int B, const int in_features, const int out_features)
+{
+    for (int b = 0; b < B; b++)
+    {
+        for (int j = 0; j < 1; j++)
+        {
+            for (int i = 0; i < out_features; i++)
+            {
+                float acc = (bias != NULL) ? bias[i] : 0.0;
+                for (int k = 0; k < in_features; k++)
+                {
+                    acc += x[(b * 1 * in_features) + (j * in_features) + i] * weight[i * in_features + k];
+                }
+                out[b * out_features + i] = acc;
+            }
+        }
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Mnist model definition
+
+#define CONV2D_1_IC 1 // conv1
+#define CONV2D_1_OC 32
+#define CONV2D_1_KS 5
+#define CONV2D_1_OS (IMAGE_SIZE - CONV2D_1_KS + 1)
+
+#define CONV2D_2_IC 32 // conv2
+#define CONV2D_2_OC 32
+#define CONV2D_2_KS 5
+#define CONV2D_2_OS (CONV2D_1_OS - CONV2D_2_KS + 1)
+
+#define MAXPOOL2D_1_KS 2 // maxpool1
+#define MAXPOOL2D_1_OS (CONV2D_2_OS - MAXPOOL2D_1_KS + 1)
+
+#define CONV2D_3_IC 32 // conv3
+#define CONV2D_3_OC 64
+#define CONV2D_3_KS 3
+#define CONV2D_3_OS (MAXPOOL2D_1_OS - CONV2D_3_KS + 1)
+
+#define CONV2D_4_IC 64 // conv4
+#define CONV2D_4_OC 64
+#define CONV2D_4_KS 3
+#define CONV2D_4_OS (CONV2D_3_OS - CONV2D_4_KS + 1)
+
+#define MAXPOOL2D_2_KS 2 // maxpool1
+#define MAXPOOL2D_2_OS (CONV2D_4_OS - MAXPOOL2D_2_KS + 1)
+
+#define LINEAR_1_IF 576 // linear
+#define LINEAR_1_OF 10
+
+#define NUM_ACTIVATION_TENSORS 11
+struct ActivationTensors
+{
+    float *conv2d_1;      // (B, CONV2D_1_OC, CONV2D_1_OS, CONV2D_1_OS)
+    float *conv2d_1_relu; // (B, CONV2D_1_OC, CONV2D_1_OS, CONV2D_1_OS)
+    float *conv2d_2;      // (B, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS)
+    float *conv2d_2_relu; // (B, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS)
+    float *maxpool2d_1;   // (B, CONV2D_2_OC, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS)
+    float *conv2d_3;      // (B, CONV2D_3_OC, CONV2D_3_OS, CONV2D_3_OS1)
+    float *conv2d_3_relu; // (B, CONV2D_3_OC, CONV2D_3_OS, CONV2D_3_OS1)
+    float *conv2d_4;      // (B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS)
+    float *conv2d_4_relu; // (B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS)
+    float *maxpool2d_2;   // (B, CONV2D_4_OC, MAXPOOL2D_2_OS, MAXPOOL2D_2_OS)
+    float *linear_1;      // (B, LINEAR_1_OF)
+};
+
+void fill_in_activation_sizes(size_t *act_sizes, int B)
+{
+    act_sizes[0] = B * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS;       // conv1
+    act_sizes[1] = B * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS;       // conv1 relu
+    act_sizes[2] = B * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS;       // conv2
+    act_sizes[3] = B * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS;       // conv2 relu
+    act_sizes[4] = B * CONV2D_2_OC * MAXPOOL2D_1_OS * MAXPOOL2D_1_OS; // maxpool1
+    act_sizes[5] = B * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS;       // conv3
+    act_sizes[6] = B * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS;       // conv3 relu
+    act_sizes[7] = B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS;       // conv4
+    act_sizes[8] = B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS;       // conv4 relu
+    act_sizes[9] = B * CONV2D_4_OC * MAXPOOL2D_2_OS * MAXPOOL2D_2_OS; // maxpool2
+    act_sizes[10] = B * LINEAR_1_OF;                                  // linear
+}
+
+float *malloc_and_point_activations(struct ActivationTensors *acts, size_t *act_sizes)
+{
+    size_t num_activations = 0;
+    for (size_t i = 0; i < NUM_ACTIVATION_TENSORS; i++)
+    {
+        num_activations += act_sizes[i];
+    }
+    float *acts_memory = (float *)malloc(num_activations * sizeof(float));
+    float **ptrs[] = {
+        &acts->conv2d_1,
+        &acts->conv2d_1_relu,
+        &acts->conv2d_2,
+        &acts->conv2d_2_relu,
+        &acts->maxpool2d_1,
+        &acts->conv2d_3,
+        &acts->conv2d_3_relu,
+        &acts->conv2d_4,
+        &acts->conv2d_4_relu,
+        &acts->maxpool2d_2,
+        &acts->linear_1};
+    float *acts_memory_iterator = acts_memory;
+    for (size_t i = 0; i < NUM_ACTIVATION_TENSORS; i++)
+    {
+        *(ptrs[i]) = acts_memory_iterator;
+        acts_memory_iterator += act_sizes[i];
+    }
+    return acts_memory;
+}
 
 // end model
 
@@ -200,42 +314,44 @@ int main()
 
     printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
+    // network arch
+    int batch_size = 1;
+
     size_t params_len;
     float *params = tensor_from_disk("./tensor.bin", 0, sizeof(float), &params_len);
     printf("total params %zu\n", params_len);
 
-    float *weights = params;
-    float *bias = params + 32 * 1 * 5 * 5;
+    float *conv2d1_w = params;
+    float *conv2d1_b = params + CONV2D_1_OC * CONV2D_1_IC * CONV2D_1_KS * CONV2D_1_KS;
 
-    float img[IMAGE_SIZE * IMAGE_SIZE];
-    for (int i = 0; i < IMAGE_SIZE * IMAGE_SIZE; i++)
+    // activations
+    size_t act_sizes[NUM_ACTIVATION_TENSORS];
+    fill_in_activation_sizes(act_sizes, batch_size);
+    struct ActivationTensors activations;
+    malloc_and_point_activations(&activations, act_sizes);
+
+    // network inference
+    float img[batch_size * IMAGE_SIZE * IMAGE_SIZE];
+    for (int i = 0; i < batch_size * IMAGE_SIZE * IMAGE_SIZE; i++)
     {
         img[i] = (float)X_train[i];
     }
 
-    int out_size = IMAGE_SIZE - 5 + 1;
-    float out[1 * 32 * out_size * out_size];
-    conv2d_forward(out, img, params, bias, 1, 1, IMAGE_SIZE, IMAGE_SIZE, 32, 5, 5);
-    printn(out, 10);
+    // forward pass
+    conv2d_forward(activations.conv2d_1, img, conv2d1_w, conv2d1_b, batch_size, CONV2D_1_IC, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
+    printn(activations.conv2d_1, 10);
+    relu_forward(activations.conv2d_1_relu, activations.conv2d_1, batch_size * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
+    printn(activations.conv2d_1_relu, 10);
 
-    float out_relu[1 * 32 * out_size * out_size];
-    relu_forward(out_relu, out, 1 * 32 * out_size * out_size);
-    printn(out_relu, 10);
+    // float out_relu[1 * 32 * out_size * out_size];
+    // relu_forward(out_relu, out, 1 * 32 * out_size * out_size);
+    // printn(out_relu, 10);
 
-    float arr[3 * 3] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
-    float out_maxpool2d[2 * 2];
-    printn(arr, 3 * 3);
-    maxpool2d_forward(out_maxpool2d, arr, 1, 1, 3, 3, 2, 2);
-    printn(out_maxpool2d, 2 * 2);
-
-    // for (int j = 0; j < out_size; j++)
-    // {
-    //     for (int i = 0; i < out_size; i++)
-    //     {
-    //         printf("%f ", out[(j * out_size) + i]);
-    //     }
-    //     printf("\n");
-    // }
+    // float arr[3 * 3] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+    // float out_maxpool2d[2 * 2];
+    // printn(arr, 3 * 3);
+    // maxpool2d_forward(out_maxpool2d, arr, 1, 1, 3, 3, 2, 2);
+    // printn(out_maxpool2d, 2 * 2);
 
     return 0;
 }
