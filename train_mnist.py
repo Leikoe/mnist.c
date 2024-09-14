@@ -19,9 +19,9 @@ def model_params(model) -> bytes:
 
     params = b""
     for k, v in model.named_parameters():
-        # print(k, v.shape)
+        print(k, v.shape)
         params += b"".join([struct.pack("f", v) for v in v.flatten().tolist()])
-        # print(len(params))
+        print(len(params))
     return params
 
 if __name__ == "__main__":
@@ -56,10 +56,12 @@ if __name__ == "__main__":
         f.write(model_params(model))
     
     
-    # a = X_train[0:1]
-    a = torch.arange(0, 28*28, dtype=torch.float32).reshape(1, 1, 28, 28).cuda()
+    a = X_train[1:3]
+    # a = torch.arange(0, 28*28, dtype=torch.float32).reshape(1, 1, 28, 28).cuda()
     print(a.flatten()[:10].tolist())
     for layer in model:
         a = layer(a)
         print(layer, "len", torch.numel(a))
         print(a.flatten()[:10].tolist())
+
+    print(model[-1].bias)

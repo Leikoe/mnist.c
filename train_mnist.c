@@ -26,33 +26,6 @@ void *tensor_from_disk(const char *path, const size_t offset, const size_t item_
     return arr;
 }
 
-// from llm.c
-void matmul_forward_naive(float *out,
-                          const float *inp, const float *weight, const float *bias,
-                          int B, int T, int C, int OC)
-{
-// the most naive implementation of matrix multiplication
-// this serves as an algorithmic reference, and as a fallback for
-// unfriendly input shapes inside matmul_forward(), below.
-#pragma omp parallel for collapse(2)
-    for (int b = 0; b < B; b++)
-    {
-        for (int t = 0; t < T; t++)
-        {
-            int bt = b * T + t;
-            for (int o = 0; o < OC; o++)
-            {
-                float val = (bias != NULL) ? bias[o] : 0.0f;
-                for (int i = 0; i < C; i++)
-                {
-                    val += inp[bt * C + i] * weight[o * C + i];
-                }
-                out[bt * OC + o] = val;
-            }
-        }
-    }
-}
-
 void conv2d_forward(
     // out_H = H - K_H + 1
     // out_W = W - K_W + 1
@@ -166,25 +139,22 @@ void maxpool2d_forward(
 
 // out = x @ weight.T + bias
 void linear_forward(
-    float *out,          // (B, 1, out_features)
-    const float *x,      // (B, 1, in_features)
+    float *out,          // (B, out_features)
+    const float *x,      // (B, in_features)
     const float *weight, // (out_features, in_features)
     const float *bias,   // (out_features)
     const int B, const int in_features, const int out_features)
 {
     for (int b = 0; b < B; b++)
     {
-        for (int j = 0; j < 1; j++)
+        for (int i = 0; i < out_features; i++)
         {
-            for (int i = 0; i < out_features; i++)
+            float acc = (bias != NULL) ? bias[i] : 0.0;
+            for (int k = 0; k < in_features; k++)
             {
-                float acc = (bias != NULL) ? bias[i] : 0.0;
-                for (int k = 0; k < in_features; k++)
-                {
-                    acc += x[(b * 1 * in_features) + (j * in_features) + i] * weight[i * in_features + k];
-                }
-                out[b * out_features + i] = acc;
+                acc += x[(b * in_features) + k] * weight[i * in_features + k];
             }
+            out[b * out_features + i] = acc;
         }
     }
 }
@@ -224,7 +194,7 @@ void argmax_forward(
 #define CONV2D_1_KS 5
 #define CONV2D_1_OS (IMAGE_SIZE - CONV2D_1_KS + 1)
 
-#define CONV2D_2_C CONV2D_1_OC // conv2
+#define CONV2D_2_C 32 // conv2
 #define CONV2D_2_OC 32
 #define CONV2D_2_KS 5
 #define CONV2D_2_OS (CONV2D_1_OS - CONV2D_2_KS + 1)
@@ -232,12 +202,12 @@ void argmax_forward(
 #define MAXPOOL2D_1_KS 2 // maxpool1
 #define MAXPOOL2D_1_OS (CONV2D_2_OS / MAXPOOL2D_1_KS)
 
-#define CONV2D_3_C CONV2D_2_OC // conv3
+#define CONV2D_3_C 32 // conv3
 #define CONV2D_3_OC 64
 #define CONV2D_3_KS 3
 #define CONV2D_3_OS (MAXPOOL2D_1_OS - CONV2D_3_KS + 1)
 
-#define CONV2D_4_C CONV2D_3_OC // conv4
+#define CONV2D_4_C 64 // conv4
 #define CONV2D_4_OC 64
 #define CONV2D_4_KS 3
 #define CONV2D_4_OS (CONV2D_3_OS - CONV2D_4_KS + 1)
@@ -399,6 +369,7 @@ int main()
 
     printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
+    int offset = 1;
     int batch_size = 1;
 
     // params
@@ -428,10 +399,8 @@ int main()
     float inputs[batch_size * IMAGE_SIZE * IMAGE_SIZE];
     for (int i = 0; i < batch_size * IMAGE_SIZE * IMAGE_SIZE; i++)
     {
-        // inputs[i] = (float)X_train[i];
-        inputs[i] = i;
+        inputs[i] = (float)X_train[offset * IMAGE_SIZE * IMAGE_SIZE + i];
     }
-    printn(inputs, 10);
 
     // forward pass
     conv2d_forward(activations.conv2d_1, inputs, params.conv1w, params.conv1b, batch_size, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
@@ -441,6 +410,8 @@ int main()
 
     conv2d_forward(activations.conv2d_2, activations.conv2d_1_relu, params.conv2w, params.conv2b, batch_size, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
     printn(activations.conv2d_2, 10);
+    return 0;
+
     relu_forward(activations.conv2d_2_relu, activations.conv2d_2, batch_size * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
     printn(activations.conv2d_2_relu, 10);
 
@@ -460,13 +431,14 @@ int main()
     maxpool2d_forward(activations.maxpool2d_2, activations.conv2d_4_relu, batch_size, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
     printn(activations.maxpool2d_2, 10);
     linear_forward(activations.linear_1, activations.maxpool2d_2, params.linear1w, params.linear1b, batch_size, LINEAR_1_IF, LINEAR_1_OF);
-    printn(activations.linear_1, LINEAR_1_OF);
+    printn(activations.linear_1, 10);
 
     int argmax[batch_size * LINEAR_1_OF];
     argmax_forward(argmax, activations.linear_1, batch_size, LINEAR_1_OF);
-    printf("y_pred = %d | y = %d\n", argmax[0], Y_train[0]);
-
-    printf("%p %p\n", activations_handle, params_handle);
+    for (int i = 0; i < batch_size; i++)
+    {
+        printf("y_pred = %d | y = %d\n", argmax[i], Y_train[offset + i]);
+    }
 
     free(activations_handle);
     free(params_handle);
