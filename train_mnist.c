@@ -7,6 +7,10 @@
 #define Y_OFFSET 8
 #define IMAGE_SIZE 28
 
+double NAN = 0.0 / 0.0;
+double POS_INF = 1.0 / 0.0;
+double NEG_INF = -1.0 / 0.0;
+
 // returns an allocated array which must be freed
 void *tensor_from_disk(const char *path, const size_t offset, const size_t item_size, size_t *len)
 {
@@ -122,6 +126,43 @@ void relu_forward(float *out, const float *in, const size_t N)
     }
 }
 
+void maxpool2d_forward(
+    // out_H = H - K_H + 1
+    // out_W = W - K_W + 1
+    float *out,      // (B, C, out_H, out_W)
+    const float *in, // (B, C, H, W)
+    const int B, const int C, const int H, const int W,
+    const int K_W, const int K_H)
+{
+    int out_H = H - K_H + 1;
+    int out_W = W - K_W + 1;
+    for (int b = 0; b < B; b++)
+    {
+        for (int c = 0; c < C; c++)
+        {
+            for (int j = 0; j < out_H; j++)
+            {
+                for (int i = 0; i < out_W; i++)
+                {
+                    float max = in[b * C * H * W + c * H * W + (j * W) + i]; // init to first or NEG_INF ?
+                    for (int k_j = 0; k_j < K_H; k_j++)
+                    {
+                        for (int k_i = 0; k_i < K_H; k_i++)
+                        {
+                            float v = in[b * C * H * W + c * H * W + ((j + k_j) * W) + (i + k_i)];
+                            if (v > max)
+                            {
+                                max = v;
+                            }
+                        }
+                    }
+                    out[b * C * out_H * out_W + c * out_H * out_W + j * out_W + i] = max;
+                }
+            }
+        }
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Mnist model definition
 
@@ -161,7 +202,7 @@ int main()
 
     size_t params_len;
     float *params = tensor_from_disk("./tensor.bin", 0, sizeof(float), &params_len);
-    printf("%zu\n", params_len);
+    printf("total params %zu\n", params_len);
 
     float *weights = params;
     float *bias = params + 32 * 1 * 5 * 5;
@@ -180,6 +221,12 @@ int main()
     float out_relu[1 * 32 * out_size * out_size];
     relu_forward(out_relu, out, 1 * 32 * out_size * out_size);
     printn(out_relu, 10);
+
+    float arr[3 * 3] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+    float out_maxpool2d[2 * 2];
+    printn(arr, 3 * 3);
+    maxpool2d_forward(out_maxpool2d, arr, 1, 1, 3, 3, 2, 2);
+    printn(out_maxpool2d, 2 * 2);
 
     // for (int j = 0; j < out_size; j++)
     // {
