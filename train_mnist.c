@@ -1,21 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <sys/_types/_size_t.h>
 
 #define X_OFFSET 0x10
 #define Y_OFFSET 8
 #define IMAGE_SIZE 28
 
 // returns an allocated array which must be freed
-void *tensor_from_disk(const char *path, const int offset, int *len)
+void *tensor_from_disk(const char *path, const size_t offset, const size_t item_size, size_t *len)
 {
     FILE *f = fopen(path, "rb"); // open file at path
     fseek(f, 0L, SEEK_END);      // get length
     int f_size = ftell(f);
+    rewind(f);  // go back to the beginning
     *len = f_size - offset;   // set read array length
     char *arr = malloc(*len); // get some memory to store read bytes
     fread(arr, 1, *len, f);   // copy "length" bytes from file into the array
     fclose(f);                // close the file
+    *len /= item_size;
     return arr;
 }
 
@@ -133,42 +136,39 @@ int main()
 
     // printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
-#define b 2
-#define c 1
-#define h 3
-#define w 3
-    float arr[b * c * h * w] = {1, 6, 2, 5, 3, 1, 7, 0, 4,
-                                1, 6, 2, 5, 3, 1, 7, 0, 4};
 
-#define k_c 1
-#define k_h 2
-#define k_w 2
-    float kernels[k_c * c * k_h * k_w] = {1, 2, -1, 0};
 
-#define out_h (h - k_h + 1)
-#define out_w (w - k_w + 1)
 
-    float out[b * k_c * out_h * out_w];
-    conv2d_forward(out, arr, kernels, NULL, b, c, h, w, k_c, k_h, k_w);
 
-    for (int z = 0; z < b; z++)
-    {
-        for (int j = 0; j < out_h; j++)
-        {
-            for (int i = 0; i < out_w; i++)
-            {
-                printf("%f ", out[(z * out_h * out_w) + (j * out_w) + i]);
-            }
-            printf("\n");
-        }
-        printf("--------\n");
+    size_t params_len;
+    float *params = tensor_from_disk("./tensor.bin", 0, sizeof(float), &params_len);
+    printf("%zu\n", params_len);
+
+    float *weights = params;
+    float *bias = params + 32 * 1 * 5 * 5;
+
+    int img_size = 28;
+    float img[img_size * img_size];
+    for (int i = 0; i < img_size * img_size; i++) img[i] = i;
+
+    int out_size = 28-5+1;
+    float out[32 * out_size * out_size];
+
+    conv2d_forward(out, img, params, bias, 1, 1, img_size, img_size, 32, 5, 5);
+
+    for (int i = 0; i < 10; i++) {
+        printf("%f, ", out[i]);
     }
+    printf("\n");
 
-    int tensor_len;
-    float *tensor = tensor_from_disk("./tensor.bin", 0, &tensor_len);
-    for (int i = 0; i < tensor_len / 4; i++)
-    {
-        printf("%f\n", tensor[i]);
-    }
+    // for (int j = 0; j < out_size; j++)
+    // {
+    //     for (int i = 0; i < out_size; i++)
+    //     {
+    //         printf("%f ", out[(j * out_size) + i]);
+    //     }
+    //     printf("\n");
+    // }
+
     return 0;
 }
