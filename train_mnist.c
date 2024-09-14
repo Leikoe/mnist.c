@@ -127,8 +127,9 @@ void relu_forward(float *out, const float *in, const size_t N)
 }
 
 void maxpool2d_forward(
-    // out_H = H - K_H + 1
-    // out_W = W - K_W + 1
+    // we are using stride = kernel size here. e.g: (2, 2) kernel => (2, 2) stride
+    // out_H = H / K_H
+    // out_W = W / K_W
     float *out,      // (B, C, out_H, out_W)
     const float *in, // (B, C, H, W)
     const int B, const int C, const int H, const int W,
@@ -144,12 +145,12 @@ void maxpool2d_forward(
             {
                 for (int i = 0; i < out_W; i++)
                 {
-                    float max = in[b * C * H * W + c * H * W + (j * W) + i]; // init to first or NEG_INF ?
+                    float max = in[b * C * H * W + c * H * W + (j * K_H * W) + (i * K_W)]; // init to first or NEG_INF ?
                     for (int k_j = 0; k_j < K_H; k_j++)
                     {
                         for (int k_i = 0; k_i < K_H; k_i++)
                         {
-                            float v = in[b * C * H * W + c * H * W + ((j + k_j) * W) + (i + k_i)];
+                            float v = in[b * C * H * W + c * H * W + ((j * K_H + k_j) * W) + (i * K_W + k_i)];
                             if (v > max)
                             {
                                 max = v;
@@ -425,26 +426,39 @@ int main()
     float inputs[batch_size * IMAGE_SIZE * IMAGE_SIZE];
     for (int i = 0; i < batch_size * IMAGE_SIZE * IMAGE_SIZE; i++)
     {
-        inputs[i] = (float)X_train[i];
+        // inputs[i] = (float)X_train[i];
+        inputs[i] = i;
     }
+    printn(inputs, 10);
 
     // forward pass
     conv2d_forward(activations.conv2d_1, inputs, params.conv1w, params.conv1b, batch_size, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
+    printn(activations.conv2d_1, 10);
     relu_forward(activations.conv2d_1_relu, activations.conv2d_1, batch_size * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
+    printn(activations.conv2d_1_relu, 10);
 
     conv2d_forward(activations.conv2d_2, activations.conv2d_1_relu, params.conv2w, params.conv2b, batch_size, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
+    printn(activations.conv2d_2, 10);
     relu_forward(activations.conv2d_2_relu, activations.conv2d_2, batch_size * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
+    printn(activations.conv2d_2_relu, 10);
 
     maxpool2d_forward(activations.maxpool2d_1, activations.conv2d_2_relu, batch_size, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS, MAXPOOL2D_1_KS, MAXPOOL2D_1_KS);
+    printn(activations.maxpool2d_1, 10);
 
     conv2d_forward(activations.conv2d_3, activations.maxpool2d_1, params.conv3w, params.conv3b, batch_size, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS);
+    printn(activations.conv2d_3, 10);
     relu_forward(activations.conv2d_3_relu, activations.conv2d_3, batch_size * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS);
+    printn(activations.conv2d_3_relu, 10);
 
     conv2d_forward(activations.conv2d_4, activations.conv2d_3_relu, params.conv4w, params.conv4b, batch_size, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
+    printn(activations.conv2d_4, 10);
     relu_forward(activations.conv2d_4_relu, activations.conv2d_4, batch_size * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
+    printn(activations.conv2d_4_relu, 10);
 
     maxpool2d_forward(activations.maxpool2d_2, activations.conv2d_4_relu, batch_size, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
+    printn(activations.maxpool2d_2, 10);
     linear_forward(activations.linear_1, activations.maxpool2d_2, params.linear1w, params.linear1b, batch_size, LINEAR_1_IF, LINEAR_1_OF);
+    printn(activations.linear_1, LINEAR_1_OF);
 
     int argmax[batch_size * LINEAR_1_OF];
     argmax_forward(argmax, activations.linear_1, batch_size, LINEAR_1_OF);
