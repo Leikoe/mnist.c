@@ -113,6 +113,13 @@ void conv2d_forward(
     }
 }
 
+void relu_forward(float *out, const float *in, const size_t N) {
+    for (int i = 0; i < N; i++) {
+        float tmp = in[i];
+        out[i] = (tmp > 0) ? tmp : 0;
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Mnist model definition
 
@@ -120,22 +127,24 @@ void conv2d_forward(
 
 int main()
 {
-    // int X_train_len;
-    // float *X_train = tensor_from_disk("./downloads/X_train.gunzip", X_OFFSET, &X_train_len);
-    // int Y_train_len;
-    // float *Y_train = tensor_from_disk("./downloads/Y_train.gunzip", Y_OFFSET, &Y_train_len);
-    // int X_test_len;
-    // float *X_test = tensor_from_disk("./downloads/X_test.gunzip", X_OFFSET, &X_test_len);
-    // int Y_test_len;
-    // float *Y_test = tensor_from_disk("./downloads/Y_test.gunzip", Y_OFFSET, &Y_test_len);
+    size_t X_train_len;
+    unsigned char *X_train = tensor_from_disk("./downloads/X_train.gunzip", X_OFFSET, sizeof(unsigned char), &X_train_len);
+    printf("%zu\n", X_train_len);
+    return 0;
+    size_t Y_train_len;
+    unsigned char *Y_train = tensor_from_disk("./downloads/Y_train.gunzip", Y_OFFSET, sizeof(unsigned char), &Y_train_len);
+    size_t X_test_len;
+    unsigned char *X_test = tensor_from_disk("./downloads/X_test.gunzip", X_OFFSET, sizeof(unsigned char), &X_test_len);
+    size_t Y_test_len;
+    unsigned char *Y_test = tensor_from_disk("./downloads/Y_test.gunzip", Y_OFFSET, sizeof(unsigned char), &Y_test_len);
 
-    // int train_len = X_train_len / (IMAGE_SIZE * IMAGE_SIZE);
-    // assert(train_len == Y_train_len); // we should have as many images as labels
-    // int test_len = X_test_len / (IMAGE_SIZE * IMAGE_SIZE);
-    // assert(test_len == Y_test_len);
+    int train_len = X_train_len / (IMAGE_SIZE * IMAGE_SIZE);
+    assert(train_len == Y_train_len); // we should have as many images as labels
+    int test_len = X_test_len / (IMAGE_SIZE * IMAGE_SIZE);
+    assert(test_len == Y_test_len);
 
-    // printf("train set size: %d | test set size: %d\n", train_len, test_len);
-
+    printf("train set size: %d | test set size: %d\n", train_len, test_len);
+    return 0;
 
 
 
