@@ -135,8 +135,8 @@ void maxpool2d_forward(
     const int B, const int C, const int H, const int W,
     const int K_W, const int K_H)
 {
-    int out_H = H - K_H + 1;
-    int out_W = W - K_W + 1;
+    int out_H = H / K_H;
+    int out_W = W / K_W;
     for (int b = 0; b < B; b++)
     {
         for (int c = 0; c < C; c++)
@@ -145,19 +145,19 @@ void maxpool2d_forward(
             {
                 for (int i = 0; i < out_W; i++)
                 {
-                    float max = in[b * C * H * W + c * H * W + (j * K_H * W) + (i * K_W)]; // init to first or NEG_INF ?
+                    float max = in[(b * C * H * W) + (c * H * W) + (j * K_H * W) + (i * K_W)]; // init to first or NEG_INF ?
                     for (int k_j = 0; k_j < K_H; k_j++)
                     {
                         for (int k_i = 0; k_i < K_H; k_i++)
                         {
-                            float v = in[b * C * H * W + c * H * W + ((j * K_H + k_j) * W) + (i * K_W + k_i)];
+                            float v = in[(b * C * H * W) + (c * H * W) + ((j * K_H + k_j) * W) + (i * K_W + k_i)];
                             if (v > max)
                             {
                                 max = v;
                             }
                         }
                     }
-                    out[b * C * out_H * out_W + c * out_H * out_W + j * out_W + i] = max;
+                    out[(b * C * out_H * out_W) + (c * out_H * out_W) + (j * out_W) + i] = max;
                 }
             }
         }
@@ -406,6 +406,7 @@ int main()
     fill_in_parameter_sizes(param_sizes);
     struct ParameterTensors params;
     float *params_handle = malloc_and_point_parameters(&params, param_sizes);
+    assert(params_handle != NULL);
 
     // load weights
     FILE *f = fopen("./params.bin", "rb");
@@ -421,6 +422,7 @@ int main()
     fill_in_activation_sizes(act_sizes, batch_size);
     struct ActivationTensors activations;
     float *activations_handle = malloc_and_point_activations(&activations, act_sizes);
+    assert(activations_handle != NULL);
 
     // network inference
     float inputs[batch_size * IMAGE_SIZE * IMAGE_SIZE];
@@ -463,6 +465,8 @@ int main()
     int argmax[batch_size * LINEAR_1_OF];
     argmax_forward(argmax, activations.linear_1, batch_size, LINEAR_1_OF);
     printf("y_pred = %d | y = %d\n", argmax[0], Y_train[0]);
+
+    printf("%p %p\n", activations_handle, params_handle);
 
     free(activations_handle);
     free(params_handle);
