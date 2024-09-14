@@ -230,7 +230,7 @@ void argmax_forward(
 #define CONV2D_2_OS (CONV2D_1_OS - CONV2D_2_KS + 1)
 
 #define MAXPOOL2D_1_KS 2 // maxpool1
-#define MAXPOOL2D_1_OS (CONV2D_2_OS - MAXPOOL2D_1_KS + 1)
+#define MAXPOOL2D_1_OS (CONV2D_2_OS / MAXPOOL2D_1_KS)
 
 #define CONV2D_3_C CONV2D_2_OC // conv3
 #define CONV2D_3_OC 64
@@ -243,7 +243,7 @@ void argmax_forward(
 #define CONV2D_4_OS (CONV2D_3_OS - CONV2D_4_KS + 1)
 
 #define MAXPOOL2D_2_KS 2 // maxpool1
-#define MAXPOOL2D_2_OS (CONV2D_4_OS - MAXPOOL2D_2_KS + 1)
+#define MAXPOOL2D_2_OS (CONV2D_4_OS / MAXPOOL2D_2_KS)
 
 #define LINEAR_1_IF 576 // linear
 #define LINEAR_1_OF 10

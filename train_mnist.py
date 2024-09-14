@@ -61,5 +61,5 @@ if __name__ == "__main__":
     print(a.flatten()[:10].tolist())
     for layer in model:
         a = layer(a)
-        print(layer)
+        print(layer, "len", torch.numel(a))
         print(a.flatten()[:10].tolist())
