@@ -188,15 +188,42 @@ void linear_forward(
     }
 }
 
+void argmax_forward(
+    int *out,        // (B,)
+    const float *in, // (B, N)
+    const int B, const int N)
+{
+    for (int b = 0; b < B; b++)
+    {
+        int argmax = 0;
+        float max = in[b * N];
+        for (int i = 0; i < N; i++)
+        {
+            float tmp = in[b * N + i];
+            if (tmp > max)
+            {
+                argmax = i;
+                max = tmp;
+            }
+        }
+        out[b] = argmax;
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Mnist model definition
 
-#define CONV2D_1_IC 1 // conv1
+// C = input channels
+// OC = output channels
+// KS = kernel size
+// OS = output size
+
+#define CONV2D_1_C 1 // conv1
 #define CONV2D_1_OC 32
 #define CONV2D_1_KS 5
 #define CONV2D_1_OS (IMAGE_SIZE - CONV2D_1_KS + 1)
 
-#define CONV2D_2_IC 32 // conv2
+#define CONV2D_2_C CONV2D_1_OC // conv2
 #define CONV2D_2_OC 32
 #define CONV2D_2_KS 5
 #define CONV2D_2_OS (CONV2D_1_OS - CONV2D_2_KS + 1)
@@ -204,12 +231,12 @@ void linear_forward(
 #define MAXPOOL2D_1_KS 2 // maxpool1
 #define MAXPOOL2D_1_OS (CONV2D_2_OS - MAXPOOL2D_1_KS + 1)
 
-#define CONV2D_3_IC 32 // conv3
+#define CONV2D_3_C CONV2D_2_OC // conv3
 #define CONV2D_3_OC 64
 #define CONV2D_3_KS 3
 #define CONV2D_3_OS (MAXPOOL2D_1_OS - CONV2D_3_KS + 1)
 
-#define CONV2D_4_IC 64 // conv4
+#define CONV2D_4_C CONV2D_3_OC // conv4
 #define CONV2D_4_OC 64
 #define CONV2D_4_KS 3
 #define CONV2D_4_OS (CONV2D_3_OS - CONV2D_4_KS + 1)
@@ -219,6 +246,62 @@ void linear_forward(
 
 #define LINEAR_1_IF 576 // linear
 #define LINEAR_1_OF 10
+
+// the parameters of the model
+#define NUM_PARAMETER_TENSORS 10
+struct ParameterTensors
+{
+    float *conv1w;   // (CONV2D_1_OC, CONV2D_1_C, CONV2D_1_KS, CONV2D_1_KS)
+    float *conv1b;   // (CONV2D_1_OC)
+    float *conv2w;   // (CONV2D_2_OC, CONV2D_2_C, CONV2D_2_KS, CONV2D_2_KS)
+    float *conv2b;   // (CONV2D_2_OC)
+    float *conv3w;   // (CONV2D_3_OC, CONV2D_3_C, CONV2D_3_KS, CONV2D_3_KS)
+    float *conv3b;   // (CONV2D_3_OC)
+    float *conv4w;   // (CONV2D_4_OC, CONV2D_4_C, CONV2D_4_KS, CONV2D_4_KS)
+    float *conv4b;   // (CONV2D_4_OC)
+    float *linear1w; // (LINEAR_1_OF, LINEAR_1_IF)
+    float *linear1b; // (LINEAR_1_OF)
+};
+
+void fill_in_parameter_sizes(size_t *param_sizes)
+{
+    param_sizes[0] = CONV2D_1_OC * CONV2D_1_C * CONV2D_1_KS * CONV2D_1_KS; // conv1w
+    param_sizes[1] = CONV2D_1_OC;                                          // conv1b
+    param_sizes[2] = CONV2D_2_OC * CONV2D_2_C * CONV2D_2_KS * CONV2D_2_KS; // conv2w
+    param_sizes[3] = CONV2D_2_OC;                                          // conv2b
+    param_sizes[4] = CONV2D_3_OC * CONV2D_3_C * CONV2D_3_KS * CONV2D_3_KS; // conv3w
+    param_sizes[5] = CONV2D_3_OC;                                          // conv3b
+    param_sizes[6] = CONV2D_4_OC * CONV2D_4_C * CONV2D_4_KS * CONV2D_4_KS; // conv4w
+    param_sizes[7] = CONV2D_4_OC;                                          // conv4b
+    param_sizes[8] = LINEAR_1_OF * LINEAR_1_IF;                            // linear1w
+    param_sizes[9] = LINEAR_1_OF;                                          // linear1b
+}
+
+// allocate memory for the parameters and point the individual tensors to the right places
+float *malloc_and_point_parameters(struct ParameterTensors *params, size_t *param_sizes)
+{
+    size_t num_parameters = 0;
+    for (size_t i = 0; i < NUM_PARAMETER_TENSORS; i++)
+    {
+        num_parameters += param_sizes[i];
+    }
+    // malloc all parameters all at once
+    float *params_memory = (float *)malloc(num_parameters * sizeof(float));
+    // assign all the tensors
+    float **ptrs[] = {
+        &params->conv1w, &params->conv1b,
+        &params->conv2w, &params->conv2b,
+        &params->conv3w, &params->conv3b,
+        &params->conv4w, &params->conv4b,
+        &params->linear1w, &params->linear1b};
+    float *params_memory_iterator = params_memory;
+    for (size_t i = 0; i < NUM_PARAMETER_TENSORS; i++)
+    {
+        *(ptrs[i]) = params_memory_iterator;
+        params_memory_iterator += param_sizes[i];
+    }
+    return params_memory;
+}
 
 #define NUM_ACTIVATION_TENSORS 11
 struct ActivationTensors
@@ -234,6 +317,7 @@ struct ActivationTensors
     float *conv2d_4_relu; // (B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS)
     float *maxpool2d_2;   // (B, CONV2D_4_OC, MAXPOOL2D_2_OS, MAXPOOL2D_2_OS)
     float *linear_1;      // (B, LINEAR_1_OF)
+    float *argmax;        // (B,)
 };
 
 void fill_in_activation_sizes(size_t *act_sizes, int B)
@@ -314,44 +398,59 @@ int main()
 
     printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
-    // network arch
     int batch_size = 1;
 
-    size_t params_len;
-    float *params = tensor_from_disk("./tensor.bin", 0, sizeof(float), &params_len);
-    printf("total params %zu\n", params_len);
+    // params
+    size_t param_sizes[NUM_PARAMETER_TENSORS];
+    fill_in_parameter_sizes(param_sizes);
+    struct ParameterTensors params;
+    float *params_handle = malloc_and_point_parameters(&params, param_sizes);
 
-    float *conv2d1_w = params;
-    float *conv2d1_b = params + CONV2D_1_OC * CONV2D_1_IC * CONV2D_1_KS * CONV2D_1_KS;
+    // load weights
+    FILE *f = fopen("./params.bin", "rb");
+    fseek(f, 0L, SEEK_END);
+    int f_size = ftell(f);
+    rewind(f);
+    fread(params_handle, 1, f_size, f);
+    fclose(f);
+    int params_len = f_size / sizeof(float);
 
     // activations
     size_t act_sizes[NUM_ACTIVATION_TENSORS];
     fill_in_activation_sizes(act_sizes, batch_size);
     struct ActivationTensors activations;
-    malloc_and_point_activations(&activations, act_sizes);
+    float *activations_handle = malloc_and_point_activations(&activations, act_sizes);
 
     // network inference
-    float img[batch_size * IMAGE_SIZE * IMAGE_SIZE];
+    float inputs[batch_size * IMAGE_SIZE * IMAGE_SIZE];
     for (int i = 0; i < batch_size * IMAGE_SIZE * IMAGE_SIZE; i++)
     {
-        img[i] = (float)X_train[i];
+        inputs[i] = (float)X_train[i];
     }
 
     // forward pass
-    conv2d_forward(activations.conv2d_1, img, conv2d1_w, conv2d1_b, batch_size, CONV2D_1_IC, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
-    printn(activations.conv2d_1, 10);
+    conv2d_forward(activations.conv2d_1, inputs, params.conv1w, params.conv1b, batch_size, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
     relu_forward(activations.conv2d_1_relu, activations.conv2d_1, batch_size * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
-    printn(activations.conv2d_1_relu, 10);
 
-    // float out_relu[1 * 32 * out_size * out_size];
-    // relu_forward(out_relu, out, 1 * 32 * out_size * out_size);
-    // printn(out_relu, 10);
+    conv2d_forward(activations.conv2d_2, activations.conv2d_1_relu, params.conv2w, params.conv2b, batch_size, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
+    relu_forward(activations.conv2d_2_relu, activations.conv2d_2, batch_size * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
 
-    // float arr[3 * 3] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
-    // float out_maxpool2d[2 * 2];
-    // printn(arr, 3 * 3);
-    // maxpool2d_forward(out_maxpool2d, arr, 1, 1, 3, 3, 2, 2);
-    // printn(out_maxpool2d, 2 * 2);
+    maxpool2d_forward(activations.maxpool2d_1, activations.conv2d_2_relu, batch_size, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS, MAXPOOL2D_1_KS, MAXPOOL2D_1_KS);
 
+    conv2d_forward(activations.conv2d_3, activations.maxpool2d_1, params.conv3w, params.conv3b, batch_size, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS);
+    relu_forward(activations.conv2d_3_relu, activations.conv2d_3, batch_size * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS);
+
+    conv2d_forward(activations.conv2d_4, activations.conv2d_3_relu, params.conv4w, params.conv4b, batch_size, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
+    relu_forward(activations.conv2d_4_relu, activations.conv2d_4, batch_size * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
+
+    maxpool2d_forward(activations.maxpool2d_2, activations.conv2d_4_relu, batch_size, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
+    linear_forward(activations.linear_1, activations.maxpool2d_2, params.linear1w, params.linear1b, batch_size, LINEAR_1_IF, LINEAR_1_OF);
+
+    int argmax[batch_size * LINEAR_1_OF];
+    argmax_forward(argmax, activations.linear_1, batch_size, LINEAR_1_OF);
+    printf("y_pred = %d | y = %d\n", argmax[0], Y_train[0]);
+
+    free(activations_handle);
+    free(params_handle);
     return 0;
 }
