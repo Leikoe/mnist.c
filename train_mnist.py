@@ -22,10 +22,12 @@ if __name__ == "__main__":
     model = nn.Sequential(
                 nn.Conv2d(1, 32, 5), nn.ReLU(),
                 nn.Conv2d(32, 32, 5), nn.ReLU(),
-                nn.BatchNorm2d(32), nn.MaxPool2d((2, 2)),
+                # nn.BatchNorm2d(32), 
+                nn.MaxPool2d((2, 2)),
                 nn.Conv2d(32, 64, 3), nn.ReLU(),
                 nn.Conv2d(64, 64, 3), nn.ReLU(),
-                nn.BatchNorm2d(64), nn.MaxPool2d((2, 2)),
+                # nn.BatchNorm2d(64), 
+                nn.MaxPool2d((2, 2)),
                 nn.Flatten(1), nn.Linear(576, 10)).cuda()
     opt = optim.Adam(model.parameters())
     loss_fn = nn.CrossEntropyLoss()
