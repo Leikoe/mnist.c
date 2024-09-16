@@ -2,14 +2,12 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
+#include <math.h>
 
 #define X_OFFSET 0x10
 #define Y_OFFSET 8
 #define IMAGE_SIZE 28
 
-double NAN = 0.0 / 0.0;
-double POS_INF = 1.0 / 0.0;
-double NEG_INF = -1.0 / 0.0;
 
 // returns an allocated array which must be freed
 void *tensor_from_disk(const char *path, const size_t offset, const size_t item_size, size_t *len)
@@ -69,6 +67,24 @@ void conv2d_forward(
         }
     }
 }
+
+// void conv2d_backward(
+//     // out_H = H - K_H + 1
+//     // out_W = W - K_W + 1
+//     float *din, // ???
+//     float *dkernels, // (K_C, C, K_H, K_W)
+//     float *dbias, // (K_C)
+//     const float *dout, // (B, K_C, out_H, out_W)
+//     const int B, const int C, const int H, const int W,
+//     const int K_C, const int K_H, const int K_W)
+// {
+//     int out_H = H - K_H + 1;
+//     int out_W = W - K_W + 1;
+
+//     // dE/dbias = dE/dout
+//     memcpy(dbias, dout, );
+
+// }
 
 void relu_forward(float *out, const float *in, const size_t N)
 {
@@ -159,6 +175,21 @@ void argmax_forward(
         }
         out[b] = argmax;
     }
+}
+
+
+// computes the mean loss over the batch
+float sparse_categorical_crossentropy_forward(
+    const float *logits, // (B, C)
+    const int *targets, // (B)
+    const int B, const int C
+) {
+    float loss = 0.0;
+    for (int b = 0; b < B; b++) {
+        int target_class = targets[b];
+        loss += -logf(logits[b * C + target_class]);
+    }
+    return loss / B;
 }
 
 // ----------------------------------------------------------------------------
@@ -268,7 +299,6 @@ struct ActivationTensors
     float *conv2d_4_relu; // (B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS)
     float *maxpool2d_2;   // (B, CONV2D_4_OC, MAXPOOL2D_2_OS, MAXPOOL2D_2_OS)
     float *linear_1;      // (B, LINEAR_1_OF)
-    float *argmax;        // (B,)
 };
 
 void fill_in_activation_sizes(size_t *act_sizes, int B)
@@ -305,7 +335,8 @@ float *malloc_and_point_activations(struct ActivationTensors *acts, size_t *act_
         &acts->conv2d_4,
         &acts->conv2d_4_relu,
         &acts->maxpool2d_2,
-        &acts->linear_1};
+        &acts->linear_1,
+    };
     float *acts_memory_iterator = acts_memory;
     for (size_t i = 0; i < NUM_ACTIVATION_TENSORS; i++)
     {
@@ -315,10 +346,160 @@ float *malloc_and_point_activations(struct ActivationTensors *acts, size_t *act_
     return acts_memory;
 }
 
+struct Model {
+    // the weights (parameters) of the model, and their sizes
+    struct ParameterTensors params;
+    size_t param_sizes[NUM_PARAMETER_TENSORS];
+    float* params_memory;
+    size_t num_parameters;
+    // gradients of the weights
+    struct ParameterTensors grads;
+    float* grads_memory;
+    // buffers for the AdamW optimizer
+    float* m_memory;
+    float* v_memory;
+    // the activations of the model, and their sizes
+    struct ActivationTensors acts;
+    size_t act_sizes[NUM_ACTIVATION_TENSORS];
+    float* acts_memory;
+    size_t num_activations;
+    // gradients of the activations
+    struct ActivationTensors grads_acts;
+    float* grads_acts_memory;
+    // other run state configuration
+    int batch_size; // the batch size (B) of current forward pass
+    float* inputs; // the input images for the current forward pass
+    int* targets; // the target labels for the current forward pass
+    float mean_loss; // after a forward pass with targets, will be populated with the mean loss
+};
+
+void model_forward(struct Model *model, const float *inputs, const int* targets, const int B) {
+    // targets are optional and could be NULL
+
+    // ensure the model was initialized or error out
+    if (model->params_memory == NULL) {
+        printf("Error: model was not initialized properly.\n");
+        exit(1);
+    }
+
+    // allocate space for all the activations if needed (done here, lazily)
+    if(model->acts_memory == NULL) {
+        // record the current B,T as well
+        model->batch_size = B;
+        // and now allocate the space
+        fill_in_activation_sizes(model->act_sizes, B);
+        size_t num_activations = 0;
+        for (size_t i = 0; i < NUM_ACTIVATION_TENSORS; i++) {
+            num_activations += model->act_sizes[i];
+        }
+        printf("num_activations: %zu\n", num_activations);
+        model->num_activations = num_activations;
+        model->acts_memory = malloc_and_point_activations(&model->acts, model->act_sizes);
+        // also create memory for caching inputs and targets
+        model->inputs = (float*)malloc(B * sizeof(float));
+        model->targets = (int*)malloc(B * sizeof(int)); // might be unused if we never have targets but it's small
+    } else {
+        // validate B,T is consistent with how we've allocated the memory before
+        // in principle we could get more clever here in the future, for now this is safest
+        if (B != model->batch_size) {
+            printf("Model: B=%d, Desired: B=%d\n", model->batch_size, (int)B);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // cache the inputs/targets
+    memcpy(model->inputs, inputs, B * sizeof(float));
+    if (targets != NULL) {
+        memcpy(model->targets, targets, B * sizeof(int));
+    }
+
+    // forward pass
+    struct ParameterTensors params = model->params; // for brevity
+    struct ActivationTensors acts = model->acts;
+    conv2d_forward(acts.conv2d_1, inputs, params.conv1w, params.conv1b, B, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
+    relu_forward(acts.conv2d_1_relu, acts.conv2d_1, B * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
+    conv2d_forward(acts.conv2d_2, acts.conv2d_1_relu, params.conv2w, params.conv2b, B, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
+    relu_forward(acts.conv2d_2_relu, acts.conv2d_2, B * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
+    maxpool2d_forward(acts.maxpool2d_1, acts.conv2d_2_relu, B, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS, MAXPOOL2D_1_KS, MAXPOOL2D_1_KS);
+    conv2d_forward(acts.conv2d_3, acts.maxpool2d_1, params.conv3w, params.conv3b, B, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS);
+    relu_forward(acts.conv2d_3_relu, acts.conv2d_3, B * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS);
+    conv2d_forward(acts.conv2d_4, acts.conv2d_3_relu, params.conv4w, params.conv4b, B, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
+    relu_forward(acts.conv2d_4_relu, acts.conv2d_4, B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
+    maxpool2d_forward(acts.maxpool2d_2, acts.conv2d_4_relu, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
+    linear_forward(acts.linear_1, acts.maxpool2d_2, params.linear1w, params.linear1b, B, LINEAR_1_IF, LINEAR_1_OF);
+
+    // int argmax[B * LINEAR_1_OF];
+    // argmax_forward(argmax, acts.linear_1, B, LINEAR_1_OF);
+    // for (int i = 0; i < B; i++)
+    // {
+    //     printf("y_pred = %d | y = %d\n", argmax[i], targets[i]);
+    // }
+
+    // also forward the cross-entropy loss function if we have the targets
+    if (targets != NULL) {
+        model->mean_loss = sparse_categorical_crossentropy_forward(acts.linear_1, targets, B, LINEAR_1_OF);
+    } else {
+        // if we don't have targets, we don't have a loss
+        model->mean_loss = -1.0f;
+    }
+}
+
+void gpt2_zero_grad(struct Model *model) {
+    if(model->grads_memory != NULL) { memset(model->grads_memory, 0, model->num_parameters * sizeof(float)); }
+    if(model->grads_acts_memory != NULL) { memset(model->grads_acts_memory, 0, model->num_activations * sizeof(float)); }
+}
+
+void model_build_from_checkpoint(struct Model *model, const char* checkpoint_path) {
+
+    // read in model from a checkpoint file
+    FILE *model_file = fopen(checkpoint_path, "rb");
+
+    // allocate space for all the parameters and read them in
+    fill_in_parameter_sizes(model->param_sizes);
+
+    // count the number of parameters
+    size_t num_parameters = 0;
+    for (size_t i = 0; i < NUM_PARAMETER_TENSORS; i++) {
+        num_parameters += model->param_sizes[i];
+    }
+    printf("loaded num_parameters: %zu\n", num_parameters);
+    model->num_parameters = num_parameters;
+
+    // read in all the parameters from file
+    model->params_memory = malloc_and_point_parameters(&model->params, model->param_sizes);
+    fread(model->params_memory, sizeof(float), num_parameters, model_file);
+    fclose(model_file);
+
+    // other inits
+    model->acts_memory = NULL;
+    model->grads_memory = NULL;
+    model->m_memory = NULL;
+    model->v_memory = NULL;
+    model->grads_acts_memory = NULL;
+    model->inputs = NULL;
+    model->targets = NULL;
+    model->batch_size = 0;
+    model->mean_loss = -1.0f; // -1.0f will designate no loss
+}
+
+void model_free(struct Model *model) {
+    free(model->params_memory);
+    free(model->grads_memory);
+    free(model->m_memory);
+    free(model->v_memory);
+    free(model->acts_memory);
+    free(model->grads_acts_memory);
+    free(model->inputs);
+    free(model->targets);
+}
+
 // end model
 
 int main()
 {
+    struct Model model;
+    model_build_from_checkpoint(&model, "params.bin");
+
     size_t X_train_len;
     unsigned char *X_train = tensor_from_disk("./downloads/X_train.gunzip", X_OFFSET, sizeof(unsigned char), &X_train_len);
     size_t Y_train_len;
@@ -336,60 +517,26 @@ int main()
     printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
     int offset = 0;
-    int batch_size = 16;
+    int B = 4;
 
-    // params
-    size_t param_sizes[NUM_PARAMETER_TENSORS];
-    fill_in_parameter_sizes(param_sizes);
-    struct ParameterTensors params;
-    float *params_handle = malloc_and_point_parameters(&params, param_sizes);
-    assert(params_handle != NULL);
+    float inputs[B * IMAGE_SIZE * IMAGE_SIZE];
+    int targets[B];
+    for (int step = 0; step < 40; step++) {
+        // copy inputs & targets from dataset
+        for (int i = 0; i < B * IMAGE_SIZE * IMAGE_SIZE; i++)
+        {
+            inputs[i] = (float)X_train[offset * IMAGE_SIZE * IMAGE_SIZE + i];
+        }
+        for (int i = 0; i < B; i++) {
+            targets[i] = Y_train[offset + i];
+        }
+        model_forward(&model, inputs, targets, B);
 
-    // load weights
-    FILE *f = fopen("./params.bin", "rb");
-    fseek(f, 0L, SEEK_END);
-    int f_size = ftell(f);
-    rewind(f);
-    fread(params_handle, 1, f_size, f);
-    fclose(f);
-    int params_len = f_size / sizeof(float);
-
-    // activations
-    size_t act_sizes[NUM_ACTIVATION_TENSORS];
-    fill_in_activation_sizes(act_sizes, batch_size);
-    struct ActivationTensors activations;
-    float *activations_handle = malloc_and_point_activations(&activations, act_sizes);
-    assert(activations_handle != NULL);
-
-    // network inference
-    float inputs[batch_size * IMAGE_SIZE * IMAGE_SIZE];
-    for (int i = 0; i < batch_size * IMAGE_SIZE * IMAGE_SIZE; i++)
-    {
-        inputs[i] = (float)X_train[offset * IMAGE_SIZE * IMAGE_SIZE + i];
+        printf("mean loss over batch: %f\n", model.mean_loss);
+        offset += B;
     }
 
-    // forward pass
-    conv2d_forward(activations.conv2d_1, inputs, params.conv1w, params.conv1b, batch_size, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
-    relu_forward(activations.conv2d_1_relu, activations.conv2d_1, batch_size * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
-    conv2d_forward(activations.conv2d_2, activations.conv2d_1_relu, params.conv2w, params.conv2b, batch_size, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
-    relu_forward(activations.conv2d_2_relu, activations.conv2d_2, batch_size * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
-    maxpool2d_forward(activations.maxpool2d_1, activations.conv2d_2_relu, batch_size, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS, MAXPOOL2D_1_KS, MAXPOOL2D_1_KS);
-    conv2d_forward(activations.conv2d_3, activations.maxpool2d_1, params.conv3w, params.conv3b, batch_size, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS);
-    relu_forward(activations.conv2d_3_relu, activations.conv2d_3, batch_size * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS);
-    conv2d_forward(activations.conv2d_4, activations.conv2d_3_relu, params.conv4w, params.conv4b, batch_size, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
-    relu_forward(activations.conv2d_4_relu, activations.conv2d_4, batch_size * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
-    maxpool2d_forward(activations.maxpool2d_2, activations.conv2d_4_relu, batch_size, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
-    linear_forward(activations.linear_1, activations.maxpool2d_2, params.linear1w, params.linear1b, batch_size, LINEAR_1_IF, LINEAR_1_OF);
-
-    int argmax[batch_size * LINEAR_1_OF];
-    argmax_forward(argmax, activations.linear_1, batch_size, LINEAR_1_OF);
-    for (int i = 0; i < batch_size; i++)
-    {
-        printf("y_pred = %d | y = %d\n", argmax[i], Y_train[offset + i]);
-    }
-
-    free(activations_handle);
-    free(params_handle);
+    model_free(&model);
     free(X_train);
     free(Y_train);
     free(X_test);
