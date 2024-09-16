@@ -44,23 +44,14 @@ void conv2d_forward(
     {
         for (int k_c = 0; k_c < K_C; k_c++)
         {
-            float acc[out_H][out_W];
+            // correlation
             for (int j = 0; j < out_H; j++)
             {
                 for (int i = 0; i < out_W; i++)
                 {
-                    acc[j][i] = (bias != NULL) ? bias[k_c] : 0.0f;
-                }
-            }
-
-            for (int c = 0; c < C; c++)
-            {
-                // correlation
-                for (int j = 0; j < out_H; j++)
-                {
-                    for (int i = 0; i < out_W; i++)
+                    float channeled_correlation_sum = 0.0;
+                    for (int c = 0; c < C; c++)
                     {
-                        float correlation_sum = 0.0;
                         // element wise multiplication
                         for (int k_j = 0; k_j < K_H; k_j++)
                         {
@@ -68,22 +59,11 @@ void conv2d_forward(
                             {
                                 float a = in[(b * C * H * W) + (c * H * W) + ((j + k_j) * W) + (i + k_i)];
                                 float b = kernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (k_j * K_W) + k_i];
-                                correlation_sum += a * b;
-                                // printf("%f * %f k_j: %d k_i: %d j: %d i: %d makes (%d, %d) idx: %d\n", a, b, k_j, k_i, j, i, j + k_j, i + k_i, ((j + k_j) * out_W) + (i + k_i));
+                                channeled_correlation_sum += a * b;
                             }
                         }
-                        acc[j][i] += correlation_sum;
-                        // printf("storing %f at (%d, %d)\n", inner_acc, j, i);
                     }
-                }
-            }
-
-            // store the output
-            for (int j = 0; j < out_H; j++)
-            {
-                for (int i = 0; i < out_W; i++)
-                {
-                    out[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (j * out_W) + i] = acc[j][i];
+                    out[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (j * out_W) + i] = channeled_correlation_sum;
                 }
             }
         }
@@ -355,8 +335,8 @@ int main()
 
     printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
-    int offset = 10;
-    int batch_size = 10;
+    int offset = 0;
+    int batch_size = 16;
 
     // params
     size_t param_sizes[NUM_PARAMETER_TENSORS];
@@ -391,18 +371,13 @@ int main()
     // forward pass
     conv2d_forward(activations.conv2d_1, inputs, params.conv1w, params.conv1b, batch_size, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
     relu_forward(activations.conv2d_1_relu, activations.conv2d_1, batch_size * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
-
     conv2d_forward(activations.conv2d_2, activations.conv2d_1_relu, params.conv2w, params.conv2b, batch_size, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
     relu_forward(activations.conv2d_2_relu, activations.conv2d_2, batch_size * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
-
     maxpool2d_forward(activations.maxpool2d_1, activations.conv2d_2_relu, batch_size, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS, MAXPOOL2D_1_KS, MAXPOOL2D_1_KS);
-
     conv2d_forward(activations.conv2d_3, activations.maxpool2d_1, params.conv3w, params.conv3b, batch_size, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS);
     relu_forward(activations.conv2d_3_relu, activations.conv2d_3, batch_size * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS);
-
     conv2d_forward(activations.conv2d_4, activations.conv2d_3_relu, params.conv4w, params.conv4b, batch_size, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
     relu_forward(activations.conv2d_4_relu, activations.conv2d_4, batch_size * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
-
     maxpool2d_forward(activations.maxpool2d_2, activations.conv2d_4_relu, batch_size, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
     linear_forward(activations.linear_1, activations.maxpool2d_2, params.linear1w, params.linear1b, batch_size, LINEAR_1_IF, LINEAR_1_OF);
 
