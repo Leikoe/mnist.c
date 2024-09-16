@@ -20,6 +20,7 @@ void *tensor_from_disk(const char *path, const size_t offset, const size_t item_
     rewind(f);                // go back to the beginning
     *len = f_size - offset;   // set read array length
     char *arr = malloc(*len); // get some memory to store read bytes
+    fseek(f, offset, SEEK_SET);   // seek to offset
     fread(arr, 1, *len, f);   // copy "length" bytes from file into the array
     fclose(f);                // close the file
     *len /= item_size;
@@ -54,25 +55,24 @@ void conv2d_forward(
 
             for (int c = 0; c < C; c++)
             {
-                int bk_cc = (b * C * H * W) + (c * H * W);
-                // slide kernel
+                // correlation
                 for (int j = 0; j < out_H; j++)
                 {
                     for (int i = 0; i < out_W; i++)
                     {
-                        float inner_acc = 0.0;
-                        // inner correlation
+                        float correlation_sum = 0.0;
+                        // element wise multiplication
                         for (int k_j = 0; k_j < K_H; k_j++)
                         {
                             for (int k_i = 0; k_i < K_W; k_i++)
                             {
-                                float a = in[bk_cc + ((j + k_j) * W) + (i + k_i)];
+                                float a = in[(b * C * H * W) + (c * H * W) + ((j + k_j) * W) + (i + k_i)];
                                 float b = kernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (k_j * K_W) + k_i];
-                                inner_acc += a * b;
+                                correlation_sum += a * b;
                                 // printf("%f * %f k_j: %d k_i: %d j: %d i: %d makes (%d, %d) idx: %d\n", a, b, k_j, k_i, j, i, j + k_j, i + k_i, ((j + k_j) * out_W) + (i + k_i));
                             }
                         }
-                        acc[j][i] += inner_acc;
+                        acc[j][i] += correlation_sum;
                         // printf("storing %f at (%d, %d)\n", inner_acc, j, i);
                     }
                 }
@@ -337,20 +337,6 @@ float *malloc_and_point_activations(struct ActivationTensors *acts, size_t *act_
 
 // end model
 
-void printn(const float *in, const size_t N)
-{
-    printf("[");
-    for (int i = 0; i < N; i++)
-    {
-        printf("%f", in[i]);
-        if (i != N - 1)
-        {
-            printf(", ");
-        }
-    }
-    printf("]\n");
-}
-
 int main()
 {
     size_t X_train_len;
@@ -369,8 +355,8 @@ int main()
 
     printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
-    int offset = 1;
-    int batch_size = 1;
+    int offset = 10;
+    int batch_size = 10;
 
     // params
     size_t param_sizes[NUM_PARAMETER_TENSORS];
@@ -404,34 +390,21 @@ int main()
 
     // forward pass
     conv2d_forward(activations.conv2d_1, inputs, params.conv1w, params.conv1b, batch_size, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
-    printn(activations.conv2d_1, 10);
     relu_forward(activations.conv2d_1_relu, activations.conv2d_1, batch_size * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
-    printn(activations.conv2d_1_relu, 10);
 
     conv2d_forward(activations.conv2d_2, activations.conv2d_1_relu, params.conv2w, params.conv2b, batch_size, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
-    printn(activations.conv2d_2, 10);
-    return 0;
-
     relu_forward(activations.conv2d_2_relu, activations.conv2d_2, batch_size * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
-    printn(activations.conv2d_2_relu, 10);
 
     maxpool2d_forward(activations.maxpool2d_1, activations.conv2d_2_relu, batch_size, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS, MAXPOOL2D_1_KS, MAXPOOL2D_1_KS);
-    printn(activations.maxpool2d_1, 10);
 
     conv2d_forward(activations.conv2d_3, activations.maxpool2d_1, params.conv3w, params.conv3b, batch_size, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS);
-    printn(activations.conv2d_3, 10);
     relu_forward(activations.conv2d_3_relu, activations.conv2d_3, batch_size * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS);
-    printn(activations.conv2d_3_relu, 10);
 
     conv2d_forward(activations.conv2d_4, activations.conv2d_3_relu, params.conv4w, params.conv4b, batch_size, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
-    printn(activations.conv2d_4, 10);
     relu_forward(activations.conv2d_4_relu, activations.conv2d_4, batch_size * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
-    printn(activations.conv2d_4_relu, 10);
 
     maxpool2d_forward(activations.maxpool2d_2, activations.conv2d_4_relu, batch_size, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
-    printn(activations.maxpool2d_2, 10);
     linear_forward(activations.linear_1, activations.maxpool2d_2, params.linear1w, params.linear1b, batch_size, LINEAR_1_IF, LINEAR_1_OF);
-    printn(activations.linear_1, 10);
 
     int argmax[batch_size * LINEAR_1_OF];
     argmax_forward(argmax, activations.linear_1, batch_size, LINEAR_1_OF);
@@ -442,5 +415,9 @@ int main()
 
     free(activations_handle);
     free(params_handle);
+    free(X_train);
+    free(Y_train);
+    free(X_test);
+    free(Y_test);
     return 0;
 }

@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 
 
@@ -25,20 +24,20 @@ def model_params(model) -> bytes:
     return params
 
 if __name__ == "__main__":
-    X_train, Y_train, X_test, Y_test = mnist(device="cuda")
+    X_train, Y_train, X_test, Y_test = mnist(device="mps")
     Y_train, Y_test = Y_train.long(), Y_test.long()
 
     model = nn.Sequential(
                 nn.Conv2d(1, 32, 5), nn.ReLU(),
                 nn.Conv2d(32, 32, 5), nn.ReLU(),
-                # nn.BatchNorm2d(32), 
+                # nn.BatchNorm2d(32),
                 nn.MaxPool2d((2, 2)),
                 nn.Conv2d(32, 64, 3), nn.ReLU(),
                 nn.Conv2d(64, 64, 3), nn.ReLU(),
-                # nn.BatchNorm2d(64), 
+                # nn.BatchNorm2d(64),
                 nn.MaxPool2d((2, 2)),
-                nn.Flatten(1), nn.Linear(576, 10)).cuda()
-    
+                nn.Flatten(1), nn.Linear(576, 10)).to("mps")
+
     opt = optim.Adam(model.parameters())
     loss_fn = nn.CrossEntropyLoss()
 
@@ -54,14 +53,3 @@ if __name__ == "__main__":
 
     with open("params.bin", "wb") as f:
         f.write(model_params(model))
-    
-    
-    a = X_train[1:3]
-    # a = torch.arange(0, 28*28, dtype=torch.float32).reshape(1, 1, 28, 28).cuda()
-    print(a.flatten()[:10].tolist())
-    for layer in model:
-        a = layer(a)
-        print(layer, "len", torch.numel(a))
-        print(a.flatten()[:10].tolist())
-
-    print(model[-1].bias)
