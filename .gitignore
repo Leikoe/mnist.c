@@ -3,3 +3,4 @@ downloads/
 build/
 pyrightconfig.json
 train_mnist
+params.bin
