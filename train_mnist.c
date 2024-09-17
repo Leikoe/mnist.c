@@ -8,6 +8,7 @@
 #define Y_OFFSET 8
 #define IMAGE_SIZE 28
 
+// UTILS
 
 // returns an allocated array which must be freed
 void *tensor_from_disk(const char *path, const size_t offset, const size_t item_size, size_t *len)
@@ -31,7 +32,21 @@ float random_float()
     return r;
 }
 
-// dataloader
+void printn(const float *in, const size_t N)
+{
+    printf("[");
+    for (int i = 0; i < N; i++)
+    {
+        printf("%f", in[i]);
+        if (i != N - 1)
+        {
+            printf(", ");
+        }
+    }
+    printf("]\n");
+}
+
+// DATALOADER
 struct DataLoader {
     int batch_size;
     float *inputs;
@@ -66,7 +81,7 @@ void dataloader_free(struct DataLoader *self) {
 }
 
 
-// ops
+// OPS
 
 void conv2d_forward(
     // out_H = H - K_H + 1
@@ -220,19 +235,68 @@ void argmax_forward(
     }
 }
 
+void softmax_forward(float* probs, float* logits, int B, int T, int V, int Vp) {
+    // output: probs are (B,T,Vp) of the probabilities (sums to 1.0 in each b,t position)
+    // input: logits is (B,T,Vp) of the unnormalized log probabilities
+    // Vp is the padded vocab size (for efficiency), V is the "real" vocab size
+    // example: Vp is 50304 and V is 50257
+    #pragma omp parallel for collapse(2)
+    for (int b = 0; b < B; b++) {
+        for (int t = 0; t < T; t++) {
+            // probs <- softmax(logits)
+            float* logits_bt = logits + b * T * Vp + t * Vp;
+            float* probs_bt = probs + b * T * Vp + t * Vp;
+
+            // maxval is only calculated and subtracted for numerical stability
+            float maxval = -10000.0f; // TODO something better
+            for (int i = 0; i < V; i++) {
+                if (logits_bt[i] > maxval) {
+                    maxval = logits_bt[i];
+                }
+            }
+            float sum = 0.0f;
+            for (int i = 0; i < V; i++) {
+                probs_bt[i] = expf(logits_bt[i] - maxval);
+                sum += probs_bt[i];
+            }
+            // note we only loop to V, leaving the padded dimensions
+            for (int i = 0; i < V; i++) {
+                probs_bt[i] /= sum;
+            }
+            // for extra super safety we may wish to include this too,
+            // forcing the probabilities here to be zero, but it shouldn't matter
+            for (int i = V; i < Vp; i++) {
+                probs_bt[i] = 0.0f;
+            }
+        }
+    }
+}
 
 // computes the mean loss over the batch
-float sparse_categorical_crossentropy_forward(
+void sparse_categorical_crossentropy_forward(
+    float *losses,      // (B,)
     const float *logits, // (B, C)
-    const int *targets, // (B)
-    const int B, const int C
+    const int *targets, // (B,)
+    const int B, const int C // C is for classes
 ) {
-    float loss = 0.0;
     for (int b = 0; b < B; b++) {
         int target_class = targets[b];
-        loss += -logf(logits[b * C + target_class]);
+        losses[b] = -logf(logits[b * C + target_class]);
     }
-    return loss / B;
+}
+
+void sparse_categorical_crossentropy_backward(
+    float *dlogits, // (B,C)
+    const float *losses, // (B,)
+    const int *targets, // (B,)
+    const int B, const int C // C is for classes
+) {
+    for (int b = 0; b < B; b++) {
+        for (int c = 0; c < C; c++) {
+            dlogits[c] = 0.0;
+        }
+        dlogits[targets[b]] = -10.0/(logf(10.0)*losses[b]);
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -328,7 +392,7 @@ float *malloc_and_point_parameters(struct ParameterTensors *params, size_t *para
     return params_memory;
 }
 
-#define NUM_ACTIVATION_TENSORS 11
+#define NUM_ACTIVATION_TENSORS 12
 struct ActivationTensors
 {
     float *conv2d_1;      // (B, CONV2D_1_OC, CONV2D_1_OS, CONV2D_1_OS)
@@ -342,6 +406,7 @@ struct ActivationTensors
     float *conv2d_4_relu; // (B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS)
     float *maxpool2d_2;   // (B, CONV2D_4_OC, MAXPOOL2D_2_OS, MAXPOOL2D_2_OS)
     float *linear_1;      // (B, LINEAR_1_OF)
+    float* losses;        // (B,)
 };
 
 void fill_in_activation_sizes(size_t *act_sizes, int B)
@@ -357,6 +422,7 @@ void fill_in_activation_sizes(size_t *act_sizes, int B)
     act_sizes[8] = B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS;       // conv4 relu
     act_sizes[9] = B * CONV2D_4_OC * MAXPOOL2D_2_OS * MAXPOOL2D_2_OS; // maxpool2
     act_sizes[10] = B * LINEAR_1_OF;                                  // linear
+    act_sizes[11] = B;                                                // losses
 }
 
 float *malloc_and_point_activations(struct ActivationTensors *acts, size_t *act_sizes)
@@ -379,6 +445,7 @@ float *malloc_and_point_activations(struct ActivationTensors *acts, size_t *act_
         &acts->conv2d_4_relu,
         &acts->maxpool2d_2,
         &acts->linear_1,
+        &acts->losses
     };
     float *acts_memory_iterator = acts_memory;
     for (size_t i = 0; i < NUM_ACTIVATION_TENSORS; i++)
@@ -471,25 +538,64 @@ void model_forward(struct Model *model, const float *inputs, const int* targets,
     maxpool2d_forward(acts.maxpool2d_2, acts.conv2d_4_relu, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
     linear_forward(acts.linear_1, acts.maxpool2d_2, params.linear1w, params.linear1b, B, LINEAR_1_IF, LINEAR_1_OF);
 
-    int argmax[B * LINEAR_1_OF];
-    argmax_forward(argmax, acts.linear_1, B, LINEAR_1_OF);
-    for (int i = 0; i < B; i++)
-    {
-        printf("y_pred = %d | y = %d\n", argmax[i], targets[i]);
-    }
+    // int argmax[B * LINEAR_1_OF];
+    // argmax_forward(argmax, acts.linear_1, B, LINEAR_1_OF);
+    // for (int i = 0; i < B; i++)
+    // {
+    //     printf("y_pred = %d | y = %d\n", argmax[i], targets[i]);
+    // }
 
     // also forward the cross-entropy loss function if we have the targets
     if (targets != NULL) {
-        model->mean_loss = sparse_categorical_crossentropy_forward(acts.linear_1, targets, B, LINEAR_1_OF);
+        sparse_categorical_crossentropy_forward(model->acts.losses, acts.linear_1, targets, B, LINEAR_1_OF);
+        // for convenience also evaluate the mean loss
+        float mean_loss = 0.0f;
+        for (int i=0; i<B; i++) { mean_loss += model->acts.losses[i]; }
+        mean_loss /= B;
+        model->mean_loss = mean_loss;
     } else {
         // if we don't have targets, we don't have a loss
         model->mean_loss = -1.0f;
     }
 }
 
-void gpt2_zero_grad(struct Model *model) {
+void model_zero_grad(struct Model *model) {
     if(model->grads_memory != NULL) { memset(model->grads_memory, 0, model->num_parameters * sizeof(float)); }
     if(model->grads_acts_memory != NULL) { memset(model->grads_acts_memory, 0, model->num_activations * sizeof(float)); }
+}
+
+void model_backward(struct Model *model) {
+
+    // double check we forwarded previously, with targets
+    if (model->mean_loss == -1.0f) {
+        printf("Error: must forward with targets before backward\n");
+        exit(1);
+    }
+
+    // lazily allocate the memory for gradients of the weights and activations, if needed
+    if (model->grads_memory == NULL) {
+        model->grads_memory = malloc_and_point_parameters(&model->grads, model->param_sizes);
+        model->grads_acts_memory = malloc_and_point_activations(&model->grads_acts, model->act_sizes);
+        model_zero_grad(model);
+    }
+
+    // convenience shortcuts (and size_t to help prevent int overflow)
+    size_t B = model->batch_size;
+
+    // backward pass: go in the reverse order of the forward pass, and call backward() functions
+    struct ParameterTensors params = model->params; // for brevity
+    struct ParameterTensors grads = model->grads;
+    struct ActivationTensors acts = model->acts;
+    struct ActivationTensors grads_acts = model->grads_acts;
+
+    // we kick off the chain rule by filling in dlosses with 1.0f/(B*T)
+    // technically this is a small, inline backward() pass of calculating
+    // total, final loss as the mean over all losses over all (B,T) positions in the batch
+    float dloss_mean = 1.0f / B;
+    for (int i = 0; i < B; i++) { grads_acts.losses[i] = dloss_mean; }
+
+    sparse_categorical_crossentropy_backward(grads_acts.linear_1, grads_acts.losses, model->targets, B, LINEAR_1_OF);
+    printn(grads_acts.linear_1, B * LINEAR_1_OF);
 }
 
 void model_build_from_checkpoint(struct Model *model, const char* checkpoint_path) {
@@ -561,17 +667,26 @@ int main()
 
     int B = 4;
 
-    struct DataLoader train_loader, val_loader;
+    struct DataLoader train_loader, test_loader;
     dataloader_init(&train_loader, X_train, Y_train, train_len, B);
-    // dataloader_init(&val_loader, X_test, Y_test, test_len, B);
+    dataloader_init(&test_loader, X_test, Y_test, test_len, B);
 
+    float test_loss = NAN;
     for (int step = 0; step < 40; step++) {
+        if (step % 10 == 0) {
+            dataloader_next_batch(&test_loader);
+            model_forward(&model, test_loader.inputs, test_loader.targets, B);
+            test_loss = model.mean_loss;
+        }
+
         dataloader_next_batch(&train_loader);
         model_forward(&model, train_loader.inputs, train_loader.targets, B);
+        // model_backward(&model);
 
-        printf("mean loss over batch: %f\n", model.mean_loss);
+        printf("loss: %f test_accuracy: %f\n", model.mean_loss, test_loss);
     }
 
+    dataloader_free(&test_loader);
     dataloader_free(&train_loader);
     model_free(&model);
     free(X_train);
