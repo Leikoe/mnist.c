@@ -52,9 +52,10 @@ void dataloader_init(struct DataLoader *dl, unsigned char *imgs, unsigned char *
 
 void dataloader_next_batch(struct DataLoader *self) {
     for (int i = 0; i < self->batch_size; i++) {
-        // int idx = random_float() * self->len;
-        int idx = i;
-        memcpy(&self->inputs[i], &self->imgs[idx * IMAGE_SIZE * IMAGE_SIZE], IMAGE_SIZE * IMAGE_SIZE);
+        int idx = random_float() * self->len;
+        for (int j = 0; j < IMAGE_SIZE * IMAGE_SIZE; j++) {
+            self->inputs[i * IMAGE_SIZE * IMAGE_SIZE + j] = (float)self->imgs[idx * IMAGE_SIZE * IMAGE_SIZE + j];
+        }
         self->targets[i] = self->labels[idx];
     }
 }
