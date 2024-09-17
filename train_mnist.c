@@ -235,39 +235,30 @@ void argmax_forward(
     }
 }
 
-void softmax_forward(float* probs, float* logits, int B, int T, int V, int Vp) {
-    // output: probs are (B,T,Vp) of the probabilities (sums to 1.0 in each b,t position)
-    // input: logits is (B,T,Vp) of the unnormalized log probabilities
-    // Vp is the padded vocab size (for efficiency), V is the "real" vocab size
-    // example: Vp is 50304 and V is 50257
-    #pragma omp parallel for collapse(2)
+void softmax_forward(
+    float *probs,      // (B, C)
+    const float *logits, // (B, C)
+    const int B, const int C // C is for classes
+) {
     for (int b = 0; b < B; b++) {
-        for (int t = 0; t < T; t++) {
-            // probs <- softmax(logits)
-            float* logits_bt = logits + b * T * Vp + t * Vp;
-            float* probs_bt = probs + b * T * Vp + t * Vp;
+        float *probs_b = probs + b * C;
+        const float *logits_b = logits + b * C;
 
-            // maxval is only calculated and subtracted for numerical stability
-            float maxval = -10000.0f; // TODO something better
-            for (int i = 0; i < V; i++) {
-                if (logits_bt[i] > maxval) {
-                    maxval = logits_bt[i];
-                }
+        // maxval is only calculated and subtracted for numerical stability
+        float maxval = -10000.0f; // TODO something better
+        for (int i = 0; i < C; i++) {
+            if (logits_b[i] > maxval) {
+                maxval = logits_b[i];
             }
-            float sum = 0.0f;
-            for (int i = 0; i < V; i++) {
-                probs_bt[i] = expf(logits_bt[i] - maxval);
-                sum += probs_bt[i];
-            }
-            // note we only loop to V, leaving the padded dimensions
-            for (int i = 0; i < V; i++) {
-                probs_bt[i] /= sum;
-            }
-            // for extra super safety we may wish to include this too,
-            // forcing the probabilities here to be zero, but it shouldn't matter
-            for (int i = V; i < Vp; i++) {
-                probs_bt[i] = 0.0f;
-            }
+        }
+        float sum = 0.0f;
+        for (int i = 0; i < C; i++) {
+            probs_b[i] = expf(logits_b[i] - maxval);
+            sum += probs_b[i];
+        }
+        // note we only loop to V, leaving the padded dimensions
+        for (int i = 0; i < C; i++) {
+            probs_b[i] /= sum;
         }
     }
 }
@@ -275,27 +266,34 @@ void softmax_forward(float* probs, float* logits, int B, int T, int V, int Vp) {
 // computes the mean loss over the batch
 void sparse_categorical_crossentropy_forward(
     float *losses,      // (B,)
-    const float *logits, // (B, C)
+    const float *probs, // (B, C)
     const int *targets, // (B,)
     const int B, const int C // C is for classes
 ) {
     for (int b = 0; b < B; b++) {
         int target_class = targets[b];
-        losses[b] = -logf(logits[b * C + target_class]);
+        losses[b] = -logf(probs[b * C + target_class]);
     }
 }
 
-void sparse_categorical_crossentropy_backward(
-    float *dlogits, // (B,C)
-    const float *losses, // (B,)
-    const int *targets, // (B,)
-    const int B, const int C // C is for classes
+void sparse_categorical_crossentropy_softmax_backward(
+    float* dlogits, // (B,C)
+    float* dlosses, // (B,)
+    float* probs,   // (B,C)
+    int* targets,   // (B,)
+    int B, int C    // C is for classes
 ) {
+    // backwards through both softmax and crossentropy
     for (int b = 0; b < B; b++) {
-        for (int c = 0; c < C; c++) {
-            dlogits[c] = 0.0;
+        float* dlogits_b = dlogits + b * C;
+        float* probs_b = probs + b * C;
+        float dloss = dlosses[b]; // dloss for this batch index
+        int ix = targets[b]; // target class for this batch index
+        for (int i = 0; i < C; i++) {
+            float p = probs_b[i];
+            float indicator = i == ix ? 1.0f : 0.0f;
+            dlogits_b[i] += (p - indicator) * dloss;
         }
-        dlogits[targets[b]] = -10.0/(logf(10.0)*losses[b]);
     }
 }
 
@@ -588,13 +586,13 @@ void model_backward(struct Model *model) {
     struct ActivationTensors acts = model->acts;
     struct ActivationTensors grads_acts = model->grads_acts;
 
-    // we kick off the chain rule by filling in dlosses with 1.0f/(B*T)
+    // we kick off the chain rule by filling in dlosses with 1.0f/(B)
     // technically this is a small, inline backward() pass of calculating
-    // total, final loss as the mean over all losses over all (B,T) positions in the batch
+    // total, final loss as the mean over all losses over all (B,) positions in the batch
     float dloss_mean = 1.0f / B;
     for (int i = 0; i < B; i++) { grads_acts.losses[i] = dloss_mean; }
 
-    sparse_categorical_crossentropy_backward(grads_acts.linear_1, grads_acts.losses, model->targets, B, LINEAR_1_OF);
+    sparse_categorical_crossentropy_softmax_backward(grads_acts.linear_1, grads_acts.losses, acts.linear_1, model->targets, B, LINEAR_1_OF);
     printn(grads_acts.linear_1, B * LINEAR_1_OF);
 }
 
@@ -681,7 +679,7 @@ int main()
 
         dataloader_next_batch(&train_loader);
         model_forward(&model, train_loader.inputs, train_loader.targets, B);
-        // model_backward(&model);
+        model_backward(&model);
 
         printf("loss: %f test_accuracy: %f\n", model.mean_loss, test_loss);
     }
