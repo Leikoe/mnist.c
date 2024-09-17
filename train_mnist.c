@@ -25,6 +25,48 @@ void *tensor_from_disk(const char *path, const size_t offset, const size_t item_
     return arr;
 }
 
+float random_float()
+{
+    float r = (float)rand() / (float)RAND_MAX;
+    return r;
+}
+
+// dataloader
+struct DataLoader {
+    int batch_size;
+    float *inputs;
+    int *targets;
+    size_t len;
+    unsigned char *imgs;
+    unsigned char *labels;
+};
+
+void dataloader_init(struct DataLoader *dl, unsigned char *imgs, unsigned char *labels, const size_t len, const int B) {
+    dl->batch_size = B;
+    dl->inputs = (float *)malloc(B * IMAGE_SIZE * IMAGE_SIZE * sizeof(float));
+    dl->targets = (int *)malloc(B * sizeof(int));
+    dl->imgs = imgs;
+    dl->labels = labels;
+    dl->len = len;
+}
+
+void dataloader_next_batch(struct DataLoader *self) {
+    for (int i = 0; i < self->batch_size; i++) {
+        // int idx = random_float() * self->len;
+        int idx = i;
+        memcpy(&self->inputs[i], &self->imgs[idx * IMAGE_SIZE * IMAGE_SIZE], IMAGE_SIZE * IMAGE_SIZE);
+        self->targets[i] = self->labels[idx];
+    }
+}
+
+void dataloader_free(struct DataLoader *self) {
+    free(self->inputs);
+    free(self->targets);
+}
+
+
+// ops
+
 void conv2d_forward(
     // out_H = H - K_H + 1
     // out_W = W - K_W + 1
@@ -428,12 +470,12 @@ void model_forward(struct Model *model, const float *inputs, const int* targets,
     maxpool2d_forward(acts.maxpool2d_2, acts.conv2d_4_relu, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
     linear_forward(acts.linear_1, acts.maxpool2d_2, params.linear1w, params.linear1b, B, LINEAR_1_IF, LINEAR_1_OF);
 
-    // int argmax[B * LINEAR_1_OF];
-    // argmax_forward(argmax, acts.linear_1, B, LINEAR_1_OF);
-    // for (int i = 0; i < B; i++)
-    // {
-    //     printf("y_pred = %d | y = %d\n", argmax[i], targets[i]);
-    // }
+    int argmax[B * LINEAR_1_OF];
+    argmax_forward(argmax, acts.linear_1, B, LINEAR_1_OF);
+    for (int i = 0; i < B; i++)
+    {
+        printf("y_pred = %d | y = %d\n", argmax[i], targets[i]);
+    }
 
     // also forward the cross-entropy loss function if we have the targets
     if (targets != NULL) {
@@ -516,26 +558,20 @@ int main()
 
     printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
-    int offset = 0;
     int B = 4;
 
-    float inputs[B * IMAGE_SIZE * IMAGE_SIZE];
-    int targets[B];
+    struct DataLoader train_loader, val_loader;
+    dataloader_init(&train_loader, X_train, Y_train, train_len, B);
+    // dataloader_init(&val_loader, X_test, Y_test, test_len, B);
+
     for (int step = 0; step < 40; step++) {
-        // copy inputs & targets from dataset
-        for (int i = 0; i < B * IMAGE_SIZE * IMAGE_SIZE; i++)
-        {
-            inputs[i] = (float)X_train[offset * IMAGE_SIZE * IMAGE_SIZE + i];
-        }
-        for (int i = 0; i < B; i++) {
-            targets[i] = Y_train[offset + i];
-        }
-        model_forward(&model, inputs, targets, B);
+        dataloader_next_batch(&train_loader);
+        model_forward(&model, train_loader.inputs, train_loader.targets, B);
 
         printf("mean loss over batch: %f\n", model.mean_loss);
-        offset += B;
     }
 
+    dataloader_free(&train_loader);
     model_free(&model);
     free(X_train);
     free(Y_train);
