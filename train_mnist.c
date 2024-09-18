@@ -743,6 +743,7 @@ void model_backward(struct Model *model) {
     relu_backward(grads_acts.conv2d_1, grads_acts.conv2d_1_relu, acts.conv2d_1, B * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
     float *dinputs = (float *)malloc(B * IMAGE_SIZE * IMAGE_SIZE * sizeof(float));  // TODO: what else could I do with it ??
     conv2d_backward(dinputs, grads.conv1w, grads.conv1b, grads_acts.conv2d_1, model->inputs, params.conv1w, params.conv1b, B, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
+    free(dinputs);
 }
 
 void model_build_from_checkpoint(struct Model *model, const char* checkpoint_path) {
