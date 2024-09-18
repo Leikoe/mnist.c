@@ -28,8 +28,7 @@ void *tensor_from_disk(const char *path, const size_t offset, const size_t item_
 
 float random_float()
 {
-    float r = (float)rand() / (float)RAND_MAX;
-    return r;
+    return (float)rand() / (float)RAND_MAX;
 }
 
 void printn(const float *in, const size_t N)
@@ -55,7 +54,7 @@ float uniform_distribution(float rangeLow, float rangeHigh) {
     return myRand_scaled;
 }
 
-void init_uniform(float *out, const float low, const float high, const int N) {
+void fill_uniform(float *out, const float low, const float high, const int N) {
     for (int i = 0; i < N; i++) {
         out[i] = uniform_distribution(low, high);
     }
@@ -710,40 +709,40 @@ void model_build_init_weights(struct Model *model) {
     {
         float k = 1.0/(CONV2D_1_C * CONV2D_1_KS * CONV2D_1_KS);
         float sqrt_k = sqrtf(k);
-        init_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_1_OC * CONV2D_1_C * CONV2D_1_KS * CONV2D_1_KS);
-        init_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_1_OC);
+        fill_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_1_OC * CONV2D_1_C * CONV2D_1_KS * CONV2D_1_KS);
+        fill_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_1_OC);
     }
 
     // init conv2d 2
     {
         float k = 1.0/(CONV2D_2_C * CONV2D_2_KS * CONV2D_2_KS);
         float sqrt_k = sqrtf(k);
-        init_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_2_OC * CONV2D_2_C * CONV2D_2_KS * CONV2D_2_KS);
-        init_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_2_OC);
+        fill_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_2_OC * CONV2D_2_C * CONV2D_2_KS * CONV2D_2_KS);
+        fill_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_2_OC);
     }
 
     // init conv2d 3
     {
         float k = 1.0/(CONV2D_3_C * CONV2D_3_KS * CONV2D_3_KS);
         float sqrt_k = sqrtf(k);
-        init_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_3_OC * CONV2D_3_C * CONV2D_3_KS * CONV2D_3_KS);
-        init_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_3_OC);
+        fill_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_3_OC * CONV2D_3_C * CONV2D_3_KS * CONV2D_3_KS);
+        fill_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_3_OC);
     }
 
     // init conv2d 4
     {
         float k = 1.0/(CONV2D_4_C * CONV2D_4_KS * CONV2D_4_KS);
         float sqrt_k = sqrtf(k);
-        init_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_4_OC * CONV2D_4_C * CONV2D_4_KS * CONV2D_4_KS);
-        init_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_4_OC);
+        fill_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_4_OC * CONV2D_4_C * CONV2D_4_KS * CONV2D_4_KS);
+        fill_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_4_OC);
     }
 
     // init linear
     {
         float k = 1.0/LINEAR_1_IF;
         float sqrt_k = sqrtf(k);
-        init_uniform(model->params.linear1w, -sqrt_k, sqrt_k, LINEAR_1_OF * LINEAR_1_IF);
-        init_uniform(model->params.linear1b, -sqrt_k, sqrt_k, LINEAR_1_OF);
+        fill_uniform(model->params.linear1w, -sqrt_k, sqrt_k, LINEAR_1_OF * LINEAR_1_IF);
+        fill_uniform(model->params.linear1b, -sqrt_k, sqrt_k, LINEAR_1_OF);
     }
 
     // other inits
