@@ -206,6 +206,46 @@ void maxpool2d_forward(
     }
 }
 
+void maxpool2d_backward(
+    // we are using stride = kernel size here. e.g: (2, 2) kernel => (2, 2) stride
+    // out_H = H / K_H
+    // out_W = W / K_W
+    float *din, // (B, C, H, W)
+    const float *in, // (B, C, H, W)
+    const float *dout,      // (B, C, out_H, out_W)
+    const int B, const int C, const int H, const int W,
+    const int K_W, const int K_H)
+{
+    int out_H = H / K_H;
+    int out_W = W / K_W;
+    // here, "din" index which has the max in "in" gets assigned the gradient
+    for (int b = 0; b < B; b++)
+    {
+        for (int c = 0; c < C; c++)
+        {
+            for (int j = 0; j < out_H; j++)
+            {
+                for (int i = 0; i < out_W; i++)
+                {
+                    int argmax = (b * C * H * W) + (c * H * W) + (j * K_H * W) + (i * K_W); // init to first or NEG_INF ?
+                    for (int k_j = 0; k_j < K_H; k_j++)
+                    {
+                        for (int k_i = 0; k_i < K_H; k_i++)
+                        {
+                            int v_i = (b * C * H * W) + (c * H * W) + ((j * K_H + k_j) * W) + (i * K_W + k_i);
+                            if (in[v_i] > in[argmax])
+                            {
+                                argmax = v_i;
+                            }
+                        }
+                    }
+                    din[argmax] = dout[(b * C * out_H * out_W) + (c * out_H * out_W) + (j * out_W) + i];
+                }
+            }
+        }
+    }
+}
+
 // out = x @ weight.T + bias
 void linear_forward(
     float *out,          // (B, out_features)
@@ -654,7 +694,8 @@ void model_backward(struct Model *model) {
     for (int i = 0; i < B; i++) { grads_acts.losses[i] = dloss_mean; }
 
     sparse_categorical_crossentropy_softmax_backward(grads_acts.linear_1, grads_acts.losses, acts.linear_1, model->targets, B, LINEAR_1_OF);
-    // linear_backward(grads_acts.maxpool2d_2, grads.linear1w, grads.linear1b, grads_acts.linear_1, acts.maxpool2d_2, params.linear1w, B, LINEAR_1_IF, LINEAR_1_OF);
+    linear_backward(grads_acts.maxpool2d_2, grads.linear1w, grads.linear1b, grads_acts.linear_1, acts.maxpool2d_2, params.linear1w, B, LINEAR_1_IF, LINEAR_1_OF);
+    maxpool2d_backward(grads_acts.conv2d_4_relu, acts.conv2d_4_relu, grads_acts.maxpool2d_2, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
     // printn(grads_acts.linear_1, B * LINEAR_1_OF);
 }
 
