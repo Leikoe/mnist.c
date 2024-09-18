@@ -1,6 +1,6 @@
 # Mnist 99% from scratch in c (and hopefully cuda too)
 
-> Note: This code is heavily inspired by llm.c's
+> Note: This code is heavily inspired by llm.c's, a lot of code was copied from there and modified.
 
 
 # How to use

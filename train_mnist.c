@@ -213,6 +213,47 @@ void linear_forward(
     }
 }
 
+void linear_backward(
+    float *din,           // (B, in_features)
+    float *dweight,       // (out_features, in_features)
+    float *dbias,         // (out_features)
+    const float *dout,    // (B, out_features)
+    const float *in,      // (B, in_features)
+    const float *weight,  // (out_features, in_features)
+    const int B, const int in_features, const int out_features)
+{
+    // din = dout @ weight
+    for (int b = 0; b < B; b++) {
+        for (int i = 0; i < in_features; i++) {
+            float acc = 0.0;
+            for (int o = 0; o < out_features; o++) {
+                acc += dout[b * out_features + o] * weight[o * in_features + i];
+            }
+            din[b * out_features + i] = acc;
+        }
+    }
+
+    // dweight = dout.T @ in
+    for (int o = 0; o < out_features; o++) {
+        for (int i = 0; i < in_features; i++) {
+            float acc = 0.0;
+            for (int b = 0; b < B; b++) {
+                acc += dout[b * out_features + o] * in[b * in_features + i];
+            }
+            dweight[o * in_features + i] = acc;
+        }
+    }
+
+    // dbias = sum(dout, axis=1)    // sum on the out_features axis
+    for (int b = 0; b < B; b++)
+    {
+        for (int o = 0; o < out_features; o++)
+        {
+            dbias[o] += dout[b * out_features + o];
+        }
+    }
+}
+
 void argmax_forward(
     int *out,        // (B,)
     const float *in, // (B, N)
@@ -240,6 +281,8 @@ void softmax_forward(
     const float *logits, // (B, C)
     const int B, const int C // C is for classes
 ) {
+    // for each batch
+    //      probs = exp(x) / sum(exp(x))
     for (int b = 0; b < B; b++) {
         float *probs_b = probs + b * C;
         const float *logits_b = logits + b * C;
@@ -256,7 +299,6 @@ void softmax_forward(
             probs_b[i] = expf(logits_b[i] - maxval);
             sum += probs_b[i];
         }
-        // note we only loop to V, leaving the padded dimensions
         for (int i = 0; i < C; i++) {
             probs_b[i] /= sum;
         }
@@ -390,7 +432,7 @@ float *malloc_and_point_parameters(struct ParameterTensors *params, size_t *para
     return params_memory;
 }
 
-#define NUM_ACTIVATION_TENSORS 12
+#define NUM_ACTIVATION_TENSORS 13
 struct ActivationTensors
 {
     float *conv2d_1;      // (B, CONV2D_1_OC, CONV2D_1_OS, CONV2D_1_OS)
@@ -404,6 +446,7 @@ struct ActivationTensors
     float *conv2d_4_relu; // (B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS)
     float *maxpool2d_2;   // (B, CONV2D_4_OC, MAXPOOL2D_2_OS, MAXPOOL2D_2_OS)
     float *linear_1;      // (B, LINEAR_1_OF)
+    float *probs;       // (B, LINEAR_1_OF)
     float* losses;        // (B,)
 };
 
@@ -420,7 +463,8 @@ void fill_in_activation_sizes(size_t *act_sizes, int B)
     act_sizes[8] = B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS;       // conv4 relu
     act_sizes[9] = B * CONV2D_4_OC * MAXPOOL2D_2_OS * MAXPOOL2D_2_OS; // maxpool2
     act_sizes[10] = B * LINEAR_1_OF;                                  // linear
-    act_sizes[11] = B;                                                // losses
+    act_sizes[11] = B * LINEAR_1_OF;                                  // softmax
+    act_sizes[12] = B;                                                // losses
 }
 
 float *malloc_and_point_activations(struct ActivationTensors *acts, size_t *act_sizes)
@@ -443,6 +487,7 @@ float *malloc_and_point_activations(struct ActivationTensors *acts, size_t *act_
         &acts->conv2d_4_relu,
         &acts->maxpool2d_2,
         &acts->linear_1,
+        &acts->probs,
         &acts->losses
     };
     float *acts_memory_iterator = acts_memory;
@@ -535,9 +580,10 @@ void model_forward(struct Model *model, const float *inputs, const int* targets,
     relu_forward(acts.conv2d_4_relu, acts.conv2d_4, B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
     maxpool2d_forward(acts.maxpool2d_2, acts.conv2d_4_relu, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
     linear_forward(acts.linear_1, acts.maxpool2d_2, params.linear1w, params.linear1b, B, LINEAR_1_IF, LINEAR_1_OF);
+    softmax_forward(acts.probs, acts.linear_1, B, LINEAR_1_OF);
 
-    // int argmax[B * LINEAR_1_OF];
-    // argmax_forward(argmax, acts.linear_1, B, LINEAR_1_OF);
+    // int argmax[B];
+    // argmax_forward(argmax, acts.softmax, B, LINEAR_1_OF);
     // for (int i = 0; i < B; i++)
     // {
     //     printf("y_pred = %d | y = %d\n", argmax[i], targets[i]);
@@ -545,7 +591,7 @@ void model_forward(struct Model *model, const float *inputs, const int* targets,
 
     // also forward the cross-entropy loss function if we have the targets
     if (targets != NULL) {
-        sparse_categorical_crossentropy_forward(model->acts.losses, acts.linear_1, targets, B, LINEAR_1_OF);
+        sparse_categorical_crossentropy_forward(model->acts.losses, acts.probs, targets, B, LINEAR_1_OF);
         // for convenience also evaluate the mean loss
         float mean_loss = 0.0f;
         for (int i=0; i<B; i++) { mean_loss += model->acts.losses[i]; }
@@ -593,7 +639,8 @@ void model_backward(struct Model *model) {
     for (int i = 0; i < B; i++) { grads_acts.losses[i] = dloss_mean; }
 
     sparse_categorical_crossentropy_softmax_backward(grads_acts.linear_1, grads_acts.losses, acts.linear_1, model->targets, B, LINEAR_1_OF);
-    printn(grads_acts.linear_1, B * LINEAR_1_OF);
+    // linear_backward(grads_acts.maxpool2d_2, grads.linear1w, grads.linear1b, grads_acts.linear_1, acts.maxpool2d_2, params.linear1w, B, LINEAR_1_IF, LINEAR_1_OF);
+    // printn(grads_acts.linear_1, B * LINEAR_1_OF);
 }
 
 void model_build_from_checkpoint(struct Model *model, const char* checkpoint_path) {
@@ -640,6 +687,35 @@ void model_free(struct Model *model) {
     free(model->targets);
 }
 
+
+void model_update(struct Model *model, float learning_rate, float beta1, float beta2, float eps, float weight_decay, int t) {
+    // reference: https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html
+
+    // lazily allocate the memory for m_memory and v_memory
+    if (model->m_memory == NULL) {
+        model->m_memory = (float*)calloc(model->num_parameters, sizeof(float));
+        model->v_memory = (float*)calloc(model->num_parameters, sizeof(float));
+    }
+
+    for (size_t i = 0; i < model->num_parameters; i++) {
+        float param = model->params_memory[i];
+        float grad = model->grads_memory[i];
+
+        // update the first moment (momentum)
+        float m = beta1 * model->m_memory[i] + (1.0f - beta1) * grad;
+        // update the second moment (RMSprop)
+        float v = beta2 * model->v_memory[i] + (1.0f - beta2) * grad * grad;
+        // bias-correct both moments
+        float m_hat = m / (1.0f - powf(beta1, t));
+        float v_hat = v / (1.0f - powf(beta2, t));
+
+        // update
+        model->m_memory[i] = m;
+        model->v_memory[i] = v;
+        model->params_memory[i] -= learning_rate * (m_hat / (sqrtf(v_hat) + eps) + weight_decay * param);
+    }
+}
+
 // end model
 
 int main()
@@ -679,9 +755,11 @@ int main()
 
         dataloader_next_batch(&train_loader);
         model_forward(&model, train_loader.inputs, train_loader.targets, B);
+        model_zero_grad(&model);
         model_backward(&model);
+        model_update(&model, 0.001, 0.9, 0.999, 1e-8, 0.0, step+1);
 
-        printf("loss: %f test_accuracy: %f\n", model.mean_loss, test_loss);
+        printf("step: %d loss: %f test_loss: %f\n", step, model.mean_loss, test_loss);
     }
 
     dataloader_free(&test_loader);

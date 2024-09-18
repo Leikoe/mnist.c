@@ -36,16 +36,24 @@ if __name__ == "__main__":
                 nn.Conv2d(64, 64, 3), nn.ReLU(),
                 # nn.BatchNorm2d(64),
                 nn.MaxPool2d((2, 2)),
-                nn.Flatten(1), nn.Linear(576, 10)).to("mps")
+                nn.Flatten(1), nn.Linear(576, 10),
+                nn.Softmax()).to("mps")
 
     opt = optim.Adam(model.parameters())
-    loss_fn = nn.CrossEntropyLoss()
+
+
+    # assumes batch input
+    def cross_entropy_loss(probs, y):
+        B, _ = probs.shape
+        batch_idxs = torch.arange(B)
+        losses = -torch.log(probs[batch_idxs, y[batch_idxs]])
+        return torch.sum(losses)
 
     test_acc = float("nan")
     for i in range(70):
         opt.zero_grad()
         samples = torch.randint(0, X_train.shape[0], (512,))
-        loss = loss_fn(model(X_train[samples]), Y_train[samples])
+        loss = cross_entropy_loss(model(X_train[samples]), Y_train[samples])
         loss.backward()
         opt.step()
         if i%10 == 9: test_acc = (torch.argmax(model(X_test), dim=1) == Y_test).float().mean() * 100
