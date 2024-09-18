@@ -4,6 +4,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <stdbool.h>
 
 #define X_OFFSET 0x10
 #define Y_OFFSET 8
@@ -106,7 +107,7 @@ void conv2d_forward(
     const float *kernels, // (K_C, C, K_H, K_W)
     const float *bias,    // (K_C)
     const int B, const int C, const int H, const int W,
-    const int K_C, const int K_H, const int K_W)
+    const int K_C, const int K_H, const int K_W, const bool flip_kernels)
 {
     int out_H = H - K_H + 1;
     int out_W = W - K_W + 1;
@@ -129,7 +130,9 @@ void conv2d_forward(
                             for (int k_i = 0; k_i < K_W; k_i++)
                             {
                                 float a = in[(b * C * H * W) + (c * H * W) + ((j + k_j) * W) + (i + k_i)];
-                                float b = kernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (k_j * K_W) + k_i];
+                                int k_j_maybe_t = (flip_kernels) ? (K_H - k_j) : k_j;
+                                int k_i_maybe_t = (flip_kernels) ? (K_W - k_i) : k_i;
+                                float b = kernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (k_j_maybe_t * K_W) + k_i_maybe_t];
                                 channeled_correlation_sum += a * b;
                             }
                         }
@@ -157,10 +160,12 @@ void conv2d_backward(
     int out_H = H - K_H + 1;
     int out_W = W - K_W + 1;
 
-    // din = ??
+    // din = conv2d(in, rot180(dout))
+    conv2d_forward(din, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, true);
+
 
     // dkernels = conv2d(in, dout)
-    conv2d_forward(dkernels, in, dout, NULL, B, C, H, W, K_C, K_H, K_W);
+    conv2d_forward(dkernels, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, false);
 
     // dbias[K_c] = sum(dout[b][k_c][out_h][out_w])
     for (int k_c = 0; k_c < K_C; k_c++) {
@@ -232,8 +237,8 @@ void maxpool2d_backward(
     // out_H = H / K_H
     // out_W = W / K_W
     float *din, // (B, C, H, W)
-    const float *in, // (B, C, H, W)
     const float *dout,      // (B, C, out_H, out_W)
+    const float *in, // (B, C, H, W)
     const int B, const int C, const int H, const int W,
     const int K_W, const int K_H)
 {
@@ -645,15 +650,21 @@ void model_forward(struct Model *model, const float *inputs, const int* targets,
     // forward pass
     struct ParameterTensors params = model->params; // for brevity
     struct ActivationTensors acts = model->acts;
-    conv2d_forward(acts.conv2d_1, inputs, params.conv1w, params.conv1b, B, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
+
+    conv2d_forward(acts.conv2d_1, inputs, params.conv1w, params.conv1b, B, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS, false);
     relu_forward(acts.conv2d_1_relu, acts.conv2d_1, B * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
-    conv2d_forward(acts.conv2d_2, acts.conv2d_1_relu, params.conv2w, params.conv2b, B, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
+
+    conv2d_forward(acts.conv2d_2, acts.conv2d_1_relu, params.conv2w, params.conv2b, B, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS, false);
     relu_forward(acts.conv2d_2_relu, acts.conv2d_2, B * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
+
     maxpool2d_forward(acts.maxpool2d_1, acts.conv2d_2_relu, B, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS, MAXPOOL2D_1_KS, MAXPOOL2D_1_KS);
-    conv2d_forward(acts.conv2d_3, acts.maxpool2d_1, params.conv3w, params.conv3b, B, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS);
+
+    conv2d_forward(acts.conv2d_3, acts.maxpool2d_1, params.conv3w, params.conv3b, B, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS, false);
     relu_forward(acts.conv2d_3_relu, acts.conv2d_3, B * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS);
-    conv2d_forward(acts.conv2d_4, acts.conv2d_3_relu, params.conv4w, params.conv4b, B, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
+
+    conv2d_forward(acts.conv2d_4, acts.conv2d_3_relu, params.conv4w, params.conv4b, B, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS, false);
     relu_forward(acts.conv2d_4_relu, acts.conv2d_4, B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
+
     maxpool2d_forward(acts.maxpool2d_2, acts.conv2d_4_relu, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
     linear_forward(acts.linear_1, acts.maxpool2d_2, params.linear1w, params.linear1b, B, LINEAR_1_IF, LINEAR_1_OF);
     softmax_forward(acts.probs, acts.linear_1, B, LINEAR_1_OF);
@@ -716,10 +727,22 @@ void model_backward(struct Model *model) {
 
     sparse_categorical_crossentropy_softmax_backward(grads_acts.linear_1, grads_acts.losses, acts.linear_1, model->targets, B, LINEAR_1_OF);
     linear_backward(grads_acts.maxpool2d_2, grads.linear1w, grads.linear1b, grads_acts.linear_1, acts.maxpool2d_2, params.linear1w, B, LINEAR_1_IF, LINEAR_1_OF);
-    maxpool2d_backward(grads_acts.conv2d_4_relu, acts.conv2d_4_relu, grads_acts.maxpool2d_2, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
+    maxpool2d_backward(grads_acts.conv2d_4_relu, grads_acts.maxpool2d_2, acts.conv2d_4_relu, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
+
     relu_backward(grads_acts.conv2d_4, grads_acts.conv2d_4_relu, acts.conv2d_4, B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
     conv2d_backward(grads_acts.conv2d_3_relu, grads.conv4w, grads.conv4b, grads_acts.conv2d_4, acts.conv2d_3_relu, params.conv4w, params.conv4b, B, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
-    // printn(grads_acts.linear_1, B * LINEAR_1_OF);
+
+    relu_backward(grads_acts.conv2d_3, grads_acts.conv2d_3_relu, acts.conv2d_3, B * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS);
+    conv2d_backward(grads_acts.maxpool2d_1, grads.conv3w, grads.conv3b, grads_acts.conv2d_3, acts.maxpool2d_1, params.conv3w, params.conv3b, B, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS);
+
+    maxpool2d_backward(grads_acts.conv2d_2_relu, grads_acts.maxpool2d_1, acts.conv2d_2_relu, B, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS, MAXPOOL2D_1_KS, MAXPOOL2D_1_KS);
+
+    relu_backward(grads_acts.conv2d_2, grads_acts.conv2d_2_relu, acts.conv2d_2, B * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
+    conv2d_backward(grads_acts.conv2d_1_relu, grads.conv2w, grads.conv2b, grads_acts.conv2d_2, acts.conv2d_1_relu, params.conv2w, params.conv2b, B, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
+
+    relu_backward(grads_acts.conv2d_1, grads_acts.conv2d_1_relu, acts.conv2d_1, B * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
+    float *dinputs = (float *)malloc(B * IMAGE_SIZE * IMAGE_SIZE * sizeof(float));  // TODO: what else could I do with it ??
+    conv2d_backward(dinputs, grads.conv1w, grads.conv1b, grads_acts.conv2d_1, model->inputs, params.conv1w, params.conv1b, B, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
 }
 
 void model_build_from_checkpoint(struct Model *model, const char* checkpoint_path) {
@@ -867,8 +890,8 @@ void model_update(struct Model *model, float learning_rate, float beta1, float b
 int main()
 {
     struct Model model;
-    // model_build_from_checkpoint(&model, "params.bin");
-    model_build_init_weights(&model);
+    model_build_from_checkpoint(&model, "params.bin");
+    // model_build_init_weights(&model);
 
     size_t X_train_len;
     unsigned char *X_train = tensor_from_disk("./downloads/X_train.gunzip", X_OFFSET, sizeof(unsigned char), &X_train_len);
