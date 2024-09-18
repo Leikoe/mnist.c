@@ -141,30 +141,51 @@ void conv2d_forward(
     }
 }
 
-// void conv2d_backward(
-//     // out_H = H - K_H + 1
-//     // out_W = W - K_W + 1
-//     float *din, // ???
-//     float *dkernels, // (K_C, C, K_H, K_W)
-//     float *dbias, // (K_C)
-//     const float *dout, // (B, K_C, out_H, out_W)
-//     const int B, const int C, const int H, const int W,
-//     const int K_C, const int K_H, const int K_W)
-// {
-//     int out_H = H - K_H + 1;
-//     int out_W = W - K_W + 1;
+void conv2d_backward(
+    // out_H = H - K_H + 1
+    // out_W = W - K_W + 1
+    float *din,           // (B, C, H, W)
+    float *dkernels,      // (K_C, C, K_H, K_W)
+    float *dbias,         // (K_C)
+    const float *dout,    // (B, K_C, out_H, out_W)
+    const float *in,      // (B, C, H, W)
+    const float *kernels, // (K_C, C, K_H, K_W)
+    const float *bias,    // (K_C)
+    const int B, const int C, const int H, const int W,
+    const int K_C, const int K_H, const int K_W)
+{
+    int out_H = H - K_H + 1;
+    int out_W = W - K_W + 1;
 
-//     // dE/dbias = dE/dout
-//     memcpy(dbias, dout, );
+    // din = ??
 
-// }
+    // dkernels = conv2d(in, dout)
+    conv2d_forward(dkernels, in, dout, NULL, B, C, H, W, K_C, K_H, K_W);
+
+    // dbias[K_c] = sum(dout[b][k_c][out_h][out_w])
+    for (int k_c = 0; k_c < K_C; k_c++) {
+        for (int b = 0; b < B; b++) {
+            for (int j = 0; j < out_H; j++) {
+                for (int i = 0; i < out_W; i++) {
+                    dbias[k_c] += dout[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (j * out_W) + i];
+                }
+            }
+        }
+    }
+}
 
 void relu_forward(float *out, const float *in, const size_t N)
 {
-    for (int i = 0; i < N; i++)
+    for (size_t i = 0; i < N; i++)
     {
         float tmp = in[i];
         out[i] = (tmp > 0) ? tmp : 0;
+    }
+}
+
+void relu_backward(float *din, const float *dout, const float *in, const size_t N) {
+    for (size_t i = 0; i < N; i++) {
+        din[i] = (in[i] > 0.0) * dout[i];
     }
 }
 
@@ -696,6 +717,8 @@ void model_backward(struct Model *model) {
     sparse_categorical_crossentropy_softmax_backward(grads_acts.linear_1, grads_acts.losses, acts.linear_1, model->targets, B, LINEAR_1_OF);
     linear_backward(grads_acts.maxpool2d_2, grads.linear1w, grads.linear1b, grads_acts.linear_1, acts.maxpool2d_2, params.linear1w, B, LINEAR_1_IF, LINEAR_1_OF);
     maxpool2d_backward(grads_acts.conv2d_4_relu, acts.conv2d_4_relu, grads_acts.maxpool2d_2, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
+    relu_backward(grads_acts.conv2d_4, grads_acts.conv2d_4_relu, acts.conv2d_4, B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
+    conv2d_backward(grads_acts.conv2d_3_relu, grads.conv4w, grads.conv4b, grads_acts.conv2d_4, acts.conv2d_3_relu, params.conv4w, params.conv4b, B, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
     // printn(grads_acts.linear_1, B * LINEAR_1_OF);
 }
 
