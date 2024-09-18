@@ -5,6 +5,9 @@
 #include <math.h>
 #include <time.h>
 #include <stdbool.h>
+#ifdef OMP
+#include <omp.h>
+#endif
 
 #define X_OFFSET 0x10
 #define Y_OFFSET 8
@@ -112,6 +115,7 @@ void conv2d_forward(
     int out_H = H - K_H + 1;
     int out_W = W - K_W + 1;
 
+    #pragma omp parallel for
     for (int b = 0; b < B; b++)
     {
         for (int k_c = 0; k_c < K_C; k_c++)
@@ -205,6 +209,8 @@ void maxpool2d_forward(
 {
     int out_H = H / K_H;
     int out_W = W / K_W;
+
+    #pragma omp parallel for
     for (int b = 0; b < B; b++)
     {
         for (int c = 0; c < C; c++)
@@ -245,6 +251,7 @@ void maxpool2d_backward(
     int out_H = H / K_H;
     int out_W = W / K_W;
     // here, "din" index which has the max in "in" gets assigned the gradient
+    #pragma omp parallel for
     for (int b = 0; b < B; b++)
     {
         for (int c = 0; c < C; c++)
@@ -280,6 +287,7 @@ void linear_forward(
     const float *bias,   // (out_features)
     const int B, const int in_features, const int out_features)
 {
+    #pragma omp parallel for
     for (int b = 0; b < B; b++)
     {
         for (int i = 0; i < out_features; i++)
@@ -304,6 +312,7 @@ void linear_backward(
     const int B, const int in_features, const int out_features)
 {
     // din = dout @ weight
+    #pragma omp parallel for
     for (int b = 0; b < B; b++) {
         for (int i = 0; i < in_features; i++) {
             float acc = 0.0;
@@ -315,6 +324,7 @@ void linear_backward(
     }
 
     // dweight = dout.T @ in
+    #pragma omp parallel for
     for (int o = 0; o < out_features; o++) {
         for (int i = 0; i < in_features; i++) {
             float acc = 0.0;
@@ -326,6 +336,7 @@ void linear_backward(
     }
 
     // dbias = sum(dout, axis=1)    // sum on the out_features axis
+    #pragma omp parallel for
     for (int b = 0; b < B; b++)
     {
         for (int o = 0; o < out_features; o++)
@@ -891,8 +902,8 @@ void model_update(struct Model *model, float learning_rate, float beta1, float b
 int main()
 {
     struct Model model;
-    model_build_from_checkpoint(&model, "params.bin");
-    // model_build_init_weights(&model);
+    // model_build_from_checkpoint(&model, "params.bin");
+    model_build_init_weights(&model);
 
     size_t X_train_len;
     unsigned char *X_train = tensor_from_disk("./downloads/X_train.gunzip", X_OFFSET, sizeof(unsigned char), &X_train_len);
@@ -910,7 +921,7 @@ int main()
 
     printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
-    int B = 4;
+    int B = 8;
 
     struct DataLoader train_loader, test_loader;
     dataloader_init(&train_loader, X_train, Y_train, train_len, B);

@@ -37,7 +37,7 @@ if __name__ == "__main__":
                 # nn.BatchNorm2d(64),
                 nn.MaxPool2d((2, 2)),
                 nn.Flatten(1), nn.Linear(576, 10),
-                nn.Softmax()).to("mps")
+                nn.Softmax(dim=1)).to("mps")
 
     opt = optim.Adam(model.parameters())
 
@@ -47,12 +47,12 @@ if __name__ == "__main__":
         B, _ = probs.shape
         batch_idxs = torch.arange(B)
         losses = -torch.log(probs[batch_idxs, y[batch_idxs]])
-        return torch.sum(losses)
+        return torch.sum(losses) / B
 
     test_acc = float("nan")
     for i in range(70):
         opt.zero_grad()
-        samples = torch.randint(0, X_train.shape[0], (512,))
+        samples = torch.randint(0, X_train.shape[0], (4,))
         loss = cross_entropy_loss(model(X_train[samples]), Y_train[samples])
         loss.backward()
         opt.step()

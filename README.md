@@ -9,3 +9,9 @@
 python download_dataset.py  # downloads the mnist dataset to downloads/
 clang train_mnist.c -o train_mnist  # run the traning
 ```
+
+optionally compile with openmp support
+```shell
+# this is for apple silicon macs, "brew install libomp" if you don't already have it
+clang -DOMP -Xclang -fopenmp -L/opt/homebrew/opt/libomp/lib -I/opt/homebrew/opt/libomp/include -lomp train_mnist.c -o train_mnist
+```
