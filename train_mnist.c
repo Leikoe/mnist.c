@@ -46,6 +46,21 @@ void printn(const float *in, const size_t N)
     printf("]\n");
 }
 
+// modified from https://stackoverflow.com/questions/11641629/generating-a-uniform-distribution-of-integers-in-c
+// guess I'll find out if it's a good enough uniform distribution we're sampling from
+float uniform_distribution(float rangeLow, float rangeHigh) {
+    double myRand = rand()/(1.0 + RAND_MAX);
+    float range = rangeHigh - rangeLow + 1.0;
+    float myRand_scaled = (myRand * range) + rangeLow;
+    return myRand_scaled;
+}
+
+void init_uniform(float *out, const float low, const float high, const int N) {
+    for (int i = 0; i < N; i++) {
+        out[i] = uniform_distribution(low, high);
+    }
+}
+
 // DATALOADER
 struct DataLoader {
     int batch_size;
@@ -676,6 +691,73 @@ void model_build_from_checkpoint(struct Model *model, const char* checkpoint_pat
     model->mean_loss = -1.0f; // -1.0f will designate no loss
 }
 
+void model_build_init_weights(struct Model *model) {
+    // allocate space for all the parameters and read them in
+    fill_in_parameter_sizes(model->param_sizes);
+
+    // count the number of parameters
+    size_t num_parameters = 0;
+    for (size_t i = 0; i < NUM_PARAMETER_TENSORS; i++) {
+        num_parameters += model->param_sizes[i];
+    }
+    printf("loaded num_parameters: %zu\n", num_parameters);
+    model->num_parameters = num_parameters;
+
+    // read in all the parameters from file
+    model->params_memory = malloc_and_point_parameters(&model->params, model->param_sizes);
+
+    // init conv2d 1
+    {
+        float k = 1.0/(CONV2D_1_C * CONV2D_1_KS * CONV2D_1_KS);
+        float sqrt_k = sqrtf(k);
+        init_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_1_OC * CONV2D_1_C * CONV2D_1_KS * CONV2D_1_KS);
+        init_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_1_OC);
+    }
+
+    // init conv2d 2
+    {
+        float k = 1.0/(CONV2D_2_C * CONV2D_2_KS * CONV2D_2_KS);
+        float sqrt_k = sqrtf(k);
+        init_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_2_OC * CONV2D_2_C * CONV2D_2_KS * CONV2D_2_KS);
+        init_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_2_OC);
+    }
+
+    // init conv2d 3
+    {
+        float k = 1.0/(CONV2D_3_C * CONV2D_3_KS * CONV2D_3_KS);
+        float sqrt_k = sqrtf(k);
+        init_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_3_OC * CONV2D_3_C * CONV2D_3_KS * CONV2D_3_KS);
+        init_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_3_OC);
+    }
+
+    // init conv2d 4
+    {
+        float k = 1.0/(CONV2D_4_C * CONV2D_4_KS * CONV2D_4_KS);
+        float sqrt_k = sqrtf(k);
+        init_uniform(model->params.conv1w, -sqrt_k, sqrt_k, CONV2D_4_OC * CONV2D_4_C * CONV2D_4_KS * CONV2D_4_KS);
+        init_uniform(model->params.conv1b, -sqrt_k, sqrt_k, CONV2D_4_OC);
+    }
+
+    // init linear
+    {
+        float k = 1.0/LINEAR_1_IF;
+        float sqrt_k = sqrtf(k);
+        init_uniform(model->params.linear1w, -sqrt_k, sqrt_k, LINEAR_1_OF * LINEAR_1_IF);
+        init_uniform(model->params.linear1b, -sqrt_k, sqrt_k, LINEAR_1_OF);
+    }
+
+    // other inits
+    model->acts_memory = NULL;
+    model->grads_memory = NULL;
+    model->m_memory = NULL;
+    model->v_memory = NULL;
+    model->grads_acts_memory = NULL;
+    model->inputs = NULL;
+    model->targets = NULL;
+    model->batch_size = 0;
+    model->mean_loss = -1.0f; // -1.0f will designate no loss
+}
+
 void model_free(struct Model *model) {
     free(model->params_memory);
     free(model->grads_memory);
@@ -721,7 +803,8 @@ void model_update(struct Model *model, float learning_rate, float beta1, float b
 int main()
 {
     struct Model model;
-    model_build_from_checkpoint(&model, "params.bin");
+    // model_build_from_checkpoint(&model, "params.bin");
+    model_build_init_weights(&model);
 
     size_t X_train_len;
     unsigned char *X_train = tensor_from_disk("./downloads/X_train.gunzip", X_OFFSET, sizeof(unsigned char), &X_train_len);
