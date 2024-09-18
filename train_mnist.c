@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 #define X_OFFSET 0x10
 #define Y_OFFSET 8
@@ -828,6 +829,7 @@ int main()
     dataloader_init(&test_loader, X_test, Y_test, test_len, B);
 
     float test_loss = NAN;
+    struct timespec start, end;
     for (int step = 0; step < 40; step++) {
         if (step % 10 == 0) {
             dataloader_next_batch(&test_loader);
@@ -835,13 +837,16 @@ int main()
             test_loss = model.mean_loss;
         }
 
+        // do a training step
+        clock_gettime(CLOCK_MONOTONIC, &start);
         dataloader_next_batch(&train_loader);
         model_forward(&model, train_loader.inputs, train_loader.targets, B);
         model_zero_grad(&model);
         model_backward(&model);
         model_update(&model, 0.001, 0.9, 0.999, 1e-8, 0.0, step+1);
-
-        printf("step: %d loss: %f test_loss: %f\n", step, model.mean_loss, test_loss);
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        double time_elapsed_s = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+        printf("step: %d loss: %f test_loss: %f (took %f ms)\n", step, model.mean_loss, test_loss, time_elapsed_s * 1000);
     }
 
     dataloader_free(&test_loader);
