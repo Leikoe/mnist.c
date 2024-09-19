@@ -56,6 +56,7 @@ void printn(const float *in, const size_t N)
 
 // modified from https://stackoverflow.com/questions/11641629/generating-a-uniform-distribution-of-integers-in-c
 // guess I'll find out if it's a good enough uniform distribution we're sampling from
+// update: I now know it's not (compared to pytorch initialized untrained model)
 float uniform_distribution(float rangeLow, float rangeHigh) {
     double myRand = rand()/(1.0 + RAND_MAX);
     float range = rangeHigh - rangeLow + 1.0;
@@ -106,7 +107,7 @@ void dataloader_free(struct DataLoader *self) {
 
 // OPS
 
-void conv2d_forward(
+void _conv2d_forward(
     // out_H = H - K_H + 1
     // out_W = W - K_W + 1
     float *out,           // (B, K_C, out_H, out_W)
@@ -114,7 +115,9 @@ void conv2d_forward(
     const float *kernels, // (K_C, C, K_H, K_W)
     const float *bias,    // (K_C)
     const int B, const int C, const int H, const int W,
-    const int K_C, const int K_H, const int K_W, const bool flip_kernels)
+    const int K_C, const int K_H, const int K_W,
+    const bool flip_kernels    // should be false by default
+)
 {
     int out_H = H - K_H + 1;
     int out_W = W - K_W + 1;
@@ -152,6 +155,19 @@ void conv2d_forward(
     }
 }
 
+void conv2d_forward(
+    // out_H = H - K_H + 1
+    // out_W = W - K_W + 1
+    float *out,           // (B, K_C, out_H, out_W)
+    const float *in,      // (B, C, H, W)
+    const float *kernels, // (K_C, C, K_H, K_W)
+    const float *bias,    // (K_C)
+    const int B, const int C, const int H, const int W,
+    const int K_C, const int K_H, const int K_W
+) {
+    _conv2d_forward(out, in, kernels, bias, B, C, H, W, K_C, K_H, K_W, false);
+}
+
 void conv2d_backward(
     // out_H = H - K_H + 1
     // out_W = W - K_W + 1
@@ -170,11 +186,28 @@ void conv2d_backward(
 
     // din = conv2d(in, rot180(dout))
     if (din != NULL) {
-        conv2d_forward(din, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, true);
+        _conv2d_forward(din, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, true);
     }
 
-    // dkernels = conv2d(in, dout)
-    conv2d_forward(dkernels, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, false);
+    // dkernels = sum(conv2d(in, dout), dim=0)
+    for (int k_c = 0; k_c < K_C; k_c++) {
+        for (int c = 0; c < C; c++) {
+            for (int i = 0; i < K_H; i++) {
+                for (int j = 0; j < K_W; j++) {
+                    float s = 0.0;
+                    for (int b = 0; b < B; b++) {
+                        for (int h = 0; h < K_H; h++) {
+                            for (int w = 0; w < K_W; w++) {
+                                s += dout[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (h * K_W) + w]
+                                    * in[(b * C * H * W) + (c * H * W) + ((h+i) * W) + (w+j)];
+                            }
+                        }
+                    }
+                    dkernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (i * K_W) + j] = s;
+                }
+            }
+        }
+    }
 
     // dbias[K_c] = sum(dout[b][k_c][out_h][out_w])
     for (int k_c = 0; k_c < K_C; k_c++) {
@@ -667,18 +700,18 @@ void model_forward(struct Model *model, const float *inputs, const int* targets,
     struct ParameterTensors params = model->params; // for brevity
     struct ActivationTensors acts = model->acts;
 
-    conv2d_forward(acts.conv2d_1, inputs, params.conv1w, params.conv1b, B, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS, false);
+    conv2d_forward(acts.conv2d_1, inputs, params.conv1w, params.conv1b, B, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
     relu_forward(acts.conv2d_1_relu, acts.conv2d_1, B * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
 
-    conv2d_forward(acts.conv2d_2, acts.conv2d_1_relu, params.conv2w, params.conv2b, B, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS, false);
+    conv2d_forward(acts.conv2d_2, acts.conv2d_1_relu, params.conv2w, params.conv2b, B, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
     relu_forward(acts.conv2d_2_relu, acts.conv2d_2, B * CONV2D_2_OC * CONV2D_2_OS * CONV2D_2_OS);
 
     maxpool2d_forward(acts.maxpool2d_1, acts.conv2d_2_relu, B, CONV2D_2_OC, CONV2D_2_OS, CONV2D_2_OS, MAXPOOL2D_1_KS, MAXPOOL2D_1_KS);
 
-    conv2d_forward(acts.conv2d_3, acts.maxpool2d_1, params.conv3w, params.conv3b, B, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS, false);
+    conv2d_forward(acts.conv2d_3, acts.maxpool2d_1, params.conv3w, params.conv3b, B, CONV2D_3_C, MAXPOOL2D_1_OS, MAXPOOL2D_1_OS, CONV2D_3_OC, CONV2D_3_KS, CONV2D_3_KS);
     relu_forward(acts.conv2d_3_relu, acts.conv2d_3, B * CONV2D_3_OC * CONV2D_3_OS * CONV2D_3_OS);
 
-    conv2d_forward(acts.conv2d_4, acts.conv2d_3_relu, params.conv4w, params.conv4b, B, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS, false);
+    conv2d_forward(acts.conv2d_4, acts.conv2d_3_relu, params.conv4w, params.conv4b, B, CONV2D_4_C, CONV2D_3_OS, CONV2D_3_OS, CONV2D_4_OC, CONV2D_4_KS, CONV2D_4_KS);
     relu_forward(acts.conv2d_4_relu, acts.conv2d_4, B * CONV2D_4_OC * CONV2D_4_OS * CONV2D_4_OS);
 
     maxpool2d_forward(acts.maxpool2d_2, acts.conv2d_4_relu, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
@@ -905,8 +938,8 @@ void model_update(struct Model *model, float learning_rate, float beta1, float b
 int main()
 {
     struct Model model;
-    // model_build_from_checkpoint(&model, "params.bin");
-    model_build_init_weights(&model);
+    model_build_from_checkpoint(&model, "params.bin");
+    // model_build_init_weights(&model);
 
     size_t X_train_len;
     unsigned char *X_train = tensor_from_disk("./downloads/X_train.gunzip", X_OFFSET, sizeof(unsigned char), &X_train_len);
@@ -949,7 +982,7 @@ int main()
         model_forward(&model, train_loader.inputs, train_loader.targets, B);
         model_zero_grad(&model);
         model_backward(&model);
-        model_update(&model, 0.001, 0.9, 0.999, 1e-8, 0.0, step+1);
+        model_update(&model, 0.001, 0.9, 0.999, 1e-8, 0.01, step+1);
         clock_gettime(CLOCK_MONOTONIC, &end);
         double time_elapsed_s = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
         printf("step %d: train loss %f (took %f ms)\n", step, model.mean_loss, time_elapsed_s * 1000);
