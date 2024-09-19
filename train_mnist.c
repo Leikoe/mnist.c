@@ -165,8 +165,9 @@ void conv2d_backward(
     int out_W = W - K_W + 1;
 
     // din = conv2d(in, rot180(dout))
-    conv2d_forward(din, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, true);
-
+    if (din != NULL) {
+        conv2d_forward(din, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, true);
+    }
 
     // dkernels = conv2d(in, dout)
     conv2d_forward(dkernels, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, false);
@@ -736,7 +737,7 @@ void model_backward(struct Model *model) {
     float dloss_mean = 1.0f / B;
     for (int i = 0; i < B; i++) { grads_acts.losses[i] = dloss_mean; }
 
-    sparse_categorical_crossentropy_softmax_backward(grads_acts.linear_1, grads_acts.losses, acts.linear_1, model->targets, B, LINEAR_1_OF);
+    sparse_categorical_crossentropy_softmax_backward(grads_acts.linear_1, grads_acts.losses, acts.probs, model->targets, B, LINEAR_1_OF);
     linear_backward(grads_acts.maxpool2d_2, grads.linear1w, grads.linear1b, grads_acts.linear_1, acts.maxpool2d_2, params.linear1w, B, LINEAR_1_IF, LINEAR_1_OF);
     maxpool2d_backward(grads_acts.conv2d_4_relu, grads_acts.maxpool2d_2, acts.conv2d_4_relu, B, CONV2D_4_OC, CONV2D_4_OS, CONV2D_4_OS, MAXPOOL2D_2_KS, MAXPOOL2D_2_KS);
 
@@ -752,9 +753,7 @@ void model_backward(struct Model *model) {
     conv2d_backward(grads_acts.conv2d_1_relu, grads.conv2w, grads.conv2b, grads_acts.conv2d_2, acts.conv2d_1_relu, params.conv2w, params.conv2b, B, CONV2D_2_C, CONV2D_1_OS, CONV2D_1_OS, CONV2D_2_OC, CONV2D_2_KS, CONV2D_2_KS);
 
     relu_backward(grads_acts.conv2d_1, grads_acts.conv2d_1_relu, acts.conv2d_1, B * CONV2D_1_OC * CONV2D_1_OS * CONV2D_1_OS);
-    float *dinputs = (float *)malloc(B * IMAGE_SIZE * IMAGE_SIZE * sizeof(float));  // TODO: what else could I do with it ??
-    conv2d_backward(dinputs, grads.conv1w, grads.conv1b, grads_acts.conv2d_1, model->inputs, params.conv1w, params.conv1b, B, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
-    free(dinputs);
+    conv2d_backward(NULL, grads.conv1w, grads.conv1b, grads_acts.conv2d_1, model->inputs, params.conv1w, params.conv1b, B, CONV2D_1_C, IMAGE_SIZE, IMAGE_SIZE, CONV2D_1_OC, CONV2D_1_KS, CONV2D_1_KS);
 }
 
 void model_build_from_checkpoint(struct Model *model, const char* checkpoint_path) {
