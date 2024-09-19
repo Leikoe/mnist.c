@@ -981,12 +981,12 @@ int main()
         printf("step %d: train loss %f (took %f ms)\n", step, model.mean_loss, time_elapsed_s * 1000);
     }
 
-    // print a few inference samples
+    printf("final inference samples:\n");
     int argmax[B];
     argmax_forward(argmax, model.acts.probs, B, LINEAR_1_OF);
     for (int i = 0; i < B; i++)
     {
-        printf("y_pred = %d | y = %d\n", argmax[i], model.targets[i]);
+        printf("    y_pred = %d | y = %d\n", argmax[i], model.targets[i]);
     }
 
     dataloader_free(&test_loader);
