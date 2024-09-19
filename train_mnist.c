@@ -9,6 +9,10 @@
 #include <omp.h>
 #endif
 
+#define MAX_STEPS 70
+#define EVAL_STEPS 10
+#define BATCH_SIZE 8
+
 #define X_OFFSET 0x10
 #define Y_OFFSET 8
 #define IMAGE_SIZE 28
@@ -920,19 +924,23 @@ int main()
 
     printf("train set size: %d | test set size: %d\n", train_len, test_len);
 
-    int B = 8;
+    int B = BATCH_SIZE;
 
     struct DataLoader train_loader, test_loader;
     dataloader_init(&train_loader, X_train, Y_train, train_len, B);
     dataloader_init(&test_loader, X_test, Y_test, test_len, B);
 
-    float test_loss = NAN;
     struct timespec start, end;
-    for (int step = 0; step < 40; step++) {
+    for (int step = 0; step < MAX_STEPS; step++) {
         if (step % 10 == 0) {
-            dataloader_next_batch(&test_loader);
-            model_forward(&model, test_loader.inputs, test_loader.targets, B);
-            test_loss = model.mean_loss;
+            float test_loss = 0.0;
+            for (int i = 0; i < EVAL_STEPS; i++) {
+                dataloader_next_batch(&test_loader);
+                model_forward(&model, test_loader.inputs, test_loader.targets, B);
+                test_loss += model.mean_loss;
+            }
+            test_loss /= EVAL_STEPS;
+            printf("val loss %f\n", test_loss);
         }
 
         // do a training step
@@ -944,7 +952,7 @@ int main()
         model_update(&model, 0.001, 0.9, 0.999, 1e-8, 0.0, step+1);
         clock_gettime(CLOCK_MONOTONIC, &end);
         double time_elapsed_s = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
-        printf("step: %d loss: %f test_loss: %f (took %f ms)\n", step, model.mean_loss, test_loss, time_elapsed_s * 1000);
+        printf("step %d: train loss %f (took %f ms)\n", step, model.mean_loss, time_elapsed_s * 1000);
     }
 
     dataloader_free(&test_loader);
