@@ -413,15 +413,15 @@ void sparse_categorical_crossentropy_forward(
 
 void sparse_categorical_crossentropy_softmax_backward(
     float* dlogits, // (B,C)
-    float* dlosses, // (B,)
-    float* probs,   // (B,C)
-    int* targets,   // (B,)
-    int B, int C    // C is for classes
+    const float* dlosses, // (B,)
+    const float* probs,   // (B,C)
+    const int* targets,   // (B,)
+    const int B, const int C    // C is for classes
 ) {
     // backwards through both softmax and crossentropy
     for (int b = 0; b < B; b++) {
         float* dlogits_b = dlogits + b * C;
-        float* probs_b = probs + b * C;
+        const float* probs_b = probs + b * C;
         float dloss = dlosses[b]; // dloss for this batch index
         int ix = targets[b]; // target class for this batch index
         for (int i = 0; i < C; i++) {
