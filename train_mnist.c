@@ -718,13 +718,6 @@ void model_forward(struct Model *model, const float *inputs, const int* targets,
     linear_forward(acts.linear_1, acts.maxpool2d_2, params.linear1w, params.linear1b, B, LINEAR_1_IF, LINEAR_1_OF);
     softmax_forward(acts.probs, acts.linear_1, B, LINEAR_1_OF);
 
-    // int argmax[B];
-    // argmax_forward(argmax, acts.softmax, B, LINEAR_1_OF);
-    // for (int i = 0; i < B; i++)
-    // {
-    //     printf("y_pred = %d | y = %d\n", argmax[i], targets[i]);
-    // }
-
     // also forward the cross-entropy loss function if we have the targets
     if (targets != NULL) {
         sparse_categorical_crossentropy_forward(model->acts.losses, acts.probs, targets, B, LINEAR_1_OF);
@@ -986,6 +979,14 @@ int main()
         clock_gettime(CLOCK_MONOTONIC, &end);
         double time_elapsed_s = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
         printf("step %d: train loss %f (took %f ms)\n", step, model.mean_loss, time_elapsed_s * 1000);
+    }
+
+    // print a few inference samples
+    int argmax[B];
+    argmax_forward(argmax, model.acts.probs, B, LINEAR_1_OF);
+    for (int i = 0; i < B; i++)
+    {
+        printf("y_pred = %d | y = %d\n", argmax[i], model.targets[i]);
     }
 
     dataloader_free(&test_loader);
