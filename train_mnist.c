@@ -960,13 +960,22 @@ int main()
     for (int step = 0; step < MAX_STEPS; step++) {
         if (step % 10 == 0) {
             float test_loss = 0.0;
+            float accuracy = 0.0;
             for (int i = 0; i < EVAL_STEPS; i++) {
                 dataloader_next_batch(&test_loader);
                 model_forward(&model, test_loader.inputs, test_loader.targets, B);
                 test_loss += model.mean_loss;
+                int argmax[B];
+                argmax_forward(argmax, model.acts.probs, B, LINEAR_1_OF);
+                for (int b = 0; b < B; b++) {
+                    if (argmax[b] == test_loader.targets[b]) {
+                        accuracy++;
+                    }
+                }
             }
+            accuracy /= EVAL_STEPS * B;
             test_loss /= EVAL_STEPS;
-            printf("val loss %f\n", test_loss);
+            printf("accuracy: %.1f%% val loss %f\n", accuracy * 100.0, test_loss);
         }
 
         // do a training step
