@@ -11,7 +11,7 @@
 
 #define MAX_STEPS 70
 #define EVAL_STEPS 10
-#define BATCH_SIZE 16
+#define BATCH_SIZE 8
 
 #define X_OFFSET 0x10
 #define Y_OFFSET 8
@@ -185,29 +185,37 @@ void conv2d_backward(
     int out_W = W - K_W + 1;
 
     // din = conv2d(in, rot180(dout))
-    if (din != NULL) {
-        _conv2d_forward(din, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, true);
-    }
+    // if (din != NULL) {
+    //     _conv2d_forward(din, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, true);
+    // }
 
     // dkernels = sum(conv2d(in, dout), dim=0)
-    // for (int k_c = 0; k_c < K_C; k_c++) {
-    //     for (int c = 0; c < C; c++) {
-    //         for (int i = 0; i < K_H; i++) {
-    //             for (int j = 0; j < K_W; j++) {
-    //                 float s = 0.0;
-    //                 for (int b = 0; b < B; b++) {
-    //                     for (int h = 0; h < K_H; h++) {
-    //                         for (int w = 0; w < K_W; w++) {
-    //                             s += dout[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (h * K_W) + w]
-    //                                 * in[(b * C * H * W) + (c * H * W) + ((h+i) * W) + (w+j)];
-    //                         }
-    //                     }
-    //                 }
-    //                 dkernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (i * K_W) + j] = s;
-    //             }
-    //         }
-    //     }
-    // }
+    // for n in range(N):       # On parcourt toutes les images
+    //     for f in range(F):   # On parcourt tous les filtres
+    //         for i in range(HH): # indices du résultat
+    //             for j in range(WW):
+    //                 for k in range(H_): # indices du filtre
+    //                     for l in range(W_):
+    //                         for c in range(C): # profondeur
+    //                             dw[f,c,i,j] += xp[n, c, stride*i+k, stride*j+l] * dout[n, f, k, l]
+
+    for (int b = 0; b < B; b++) {
+        for (int k_c = 0; k_c < K_C; k_c++) {
+            for (int k_h = 0; k_h < K_H; k_h++) {
+                for (int k_w = 0; k_w < K_W; k_w++) {
+                    for (int i = 0; i < out_H; i++) {
+                        for (int j = 0; j < out_W; j++) {
+                            for (int c = 0; c < C; c++) {
+                                dkernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (k_h * K_W) + k_w] += in[(b * C * H * W) + (c * H * W) + (i * W) + j]
+                                    * dout[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (i * out_W) + j];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 
     // dbias[K_c] = sum(dout[b][k_c][out_h][out_w])
     for (int k_c = 0; k_c < K_C; k_c++) {
