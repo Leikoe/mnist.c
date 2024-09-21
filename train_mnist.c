@@ -11,7 +11,7 @@
 
 #define MAX_STEPS 70
 #define EVAL_STEPS 10
-#define BATCH_SIZE 8
+#define BATCH_SIZE 16
 
 #define X_OFFSET 0x10
 #define Y_OFFSET 8
@@ -190,24 +190,24 @@ void conv2d_backward(
     }
 
     // dkernels = sum(conv2d(in, dout), dim=0)
-    for (int k_c = 0; k_c < K_C; k_c++) {
-        for (int c = 0; c < C; c++) {
-            for (int i = 0; i < K_H; i++) {
-                for (int j = 0; j < K_W; j++) {
-                    float s = 0.0;
-                    for (int b = 0; b < B; b++) {
-                        for (int h = 0; h < K_H; h++) {
-                            for (int w = 0; w < K_W; w++) {
-                                s += dout[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (h * K_W) + w]
-                                    * in[(b * C * H * W) + (c * H * W) + ((h+i) * W) + (w+j)];
-                            }
-                        }
-                    }
-                    dkernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (i * K_W) + j] = s;
-                }
-            }
-        }
-    }
+    // for (int k_c = 0; k_c < K_C; k_c++) {
+    //     for (int c = 0; c < C; c++) {
+    //         for (int i = 0; i < K_H; i++) {
+    //             for (int j = 0; j < K_W; j++) {
+    //                 float s = 0.0;
+    //                 for (int b = 0; b < B; b++) {
+    //                     for (int h = 0; h < K_H; h++) {
+    //                         for (int w = 0; w < K_W; w++) {
+    //                             s += dout[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (h * K_W) + w]
+    //                                 * in[(b * C * H * W) + (c * H * W) + ((h+i) * W) + (w+j)];
+    //                         }
+    //                     }
+    //                 }
+    //                 dkernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (i * K_W) + j] = s;
+    //             }
+    //         }
+    //     }
+    // }
 
     // dbias[K_c] = sum(dout[b][k_c][out_h][out_w])
     for (int k_c = 0; k_c < K_C; k_c++) {
@@ -958,7 +958,7 @@ int main()
 
     struct timespec start, end;
     for (int step = 0; step < MAX_STEPS; step++) {
-        if (step % 10 == 0) {
+        if ((step % 10 == 0) || (step == MAX_STEPS - 1)) {
             float test_loss = 0.0;
             float accuracy = 0.0;
             for (int i = 0; i < EVAL_STEPS; i++) {
