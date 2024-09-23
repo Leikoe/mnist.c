@@ -141,8 +141,8 @@ void _conv2d_forward(
                             for (int k_i = 0; k_i < K_W; k_i++)
                             {
                                 float a = in[(b * C * H * W) + (c * H * W) + ((j + k_j) * W) + (i + k_i)];
-                                int k_j_maybe_t = (flip_kernels) ? (K_H - k_j) : k_j;
-                                int k_i_maybe_t = (flip_kernels) ? (K_W - k_i) : k_i;
+                                int k_j_maybe_t = (flip_kernels) ? (K_H - k_j - 1) : k_j;
+                                int k_i_maybe_t = (flip_kernels) ? (K_W - k_i - 1) : k_i;
                                 float b = kernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (k_j_maybe_t * K_W) + k_i_maybe_t];
                                 channeled_correlation_sum += a * b;
                             }
@@ -184,10 +184,45 @@ void conv2d_backward(
     int out_H = H - K_H + 1;
     int out_W = W - K_W + 1;
 
-    // din = conv2d(in, rot180(dout))
-    // if (din != NULL) {
-    //     _conv2d_forward(din, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, true);
-    // }
+    // din = conv2dfull(in, rot180(dout))
+    if (din != NULL) {
+        // _conv2d_forward(din, in, dout, NULL, B, C, H, W, K_C, K_H, K_W, true);
+        int pad_h = (K_H - 1);
+        int pad_w = (K_W - 1);
+        float * doutp = calloc(B * K_C * (out_H + pad_h * 2) * (out_W + pad_w * 2), sizeof(float));
+        for(int b = 0; b < B; b++) {
+            for (int k_c = 0; k_c < K_C; k_c++) {
+                for (int i = 0; i < out_H; i++) {
+                    for (int j = 0; j < out_W; j++) {
+                        doutp[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + ((i + pad_h) * out_W) + (j + pad_w)] = dout[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (i * out_W) + j];
+                    }
+                }
+            }
+        }
+
+        for (int b = 0; b < B; b++) {
+            for (int k_c = 0; k_c < K_C; k_c++) {
+                for (int i = 0; i < H; i++) {
+                    for (int j = 0; j < W; j++) {
+                        for (int k_h = 0; k_h < K_H; k_h++) {
+                            for (int k_w = 0; k_w < K_W; k_w++) {
+                                for (int c = 0; c < C; c++) {
+                                    // if ((i + k_h - pad_h) > pad_h && (i + k_h - pad_h) < H - pad_h
+                                    //     && (j + k_w - pad_w) > pad_w && (j + k_w - pad_w) < W - pad_w) {
+                                    //     din[(b * C * H * W) + (c * H * W) + (i * W) + j] = dout[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + ((i + k_h - pad_h) * out_W) + (j + k_w - pad_w)]
+                                    //                                             * kernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + ((K_H - k_h - 1) * K_W) + (K_W - k_w - 1)];
+                                    // }
+                                    din[(b * C * H * W) + (c * H * W) + (i * W) + j] += doutp[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + ((i + k_h) * out_W) + (j + k_w)]
+                                        * kernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + ((K_H - k_h - 1) * K_W) + (K_W - k_w - 1)];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        free(doutp);
+    }
 
     // dkernels = sum(conv2d(in, dout), dim=0)
     // for n in range(N):       # On parcourt toutes les images
@@ -206,7 +241,7 @@ void conv2d_backward(
                     for (int i = 0; i < out_H; i++) {
                         for (int j = 0; j < out_W; j++) {
                             for (int c = 0; c < C; c++) {
-                                dkernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (k_h * K_W) + k_w] += in[(b * C * H * W) + (c * H * W) + (i * W) + j]
+                                dkernels[(k_c * C * K_H * K_W) + (c * K_H * K_W) + (k_h * K_W) + k_w] += in[(b * C * H * W) + (c * H * W) + ((i + k_h) * W) + (j + k_w)]
                                     * dout[(b * K_C * out_H * out_W) + (k_c * out_H * out_W) + (i * out_W) + j];
                             }
                         }
@@ -217,7 +252,7 @@ void conv2d_backward(
     }
 
 
-    // dbias[K_c] = sum(dout[b][k_c][out_h][out_w])
+    // dbias[k_c] = sum(dout[b][k_c][out_h][out_w]) (sum on all axis except filters)
     for (int k_c = 0; k_c < K_C; k_c++) {
         for (int b = 0; b < B; b++) {
             for (int j = 0; j < out_H; j++) {
